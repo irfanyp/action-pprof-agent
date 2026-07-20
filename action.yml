@@ -34,6 +34,15 @@ inputs:
         with:
           tags: ${{ inputs.tags }}
     required: true
+  analyzer_result_file:
+    description: |-
+      Optional path to a JSON file containing a pre-computed analyzer result.
+      When set, the action skips the SERVICE_URL trigger/poll/submit steps (1a,
+      1b, 1k) and loads the analyzer result from this file instead. Intended for
+      testing purposes. When unset, the normal SERVICE_URL flow is used.
+    required: false
+    default: ''
+
 
 outputs:
   run_id:
@@ -117,8 +126,10 @@ runs:
         GITHUB_WORKSPACE: ${{ github.workspace }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
         ACTION_PATH: ${{ github.action_path }}
+        ANALYZER_RESULT_FILE: ${{ inputs.analyzer_result_file }}
       run: |
         python "${ACTION_PATH}/scripts/analyzer.py"
+
 
     # ---------------------------------------------------------------------
     # 1i. Upload artifacts.

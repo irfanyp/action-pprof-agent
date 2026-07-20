@@ -29,6 +29,8 @@ See [`examples/workflow.yml`](examples/workflow.yml) for a complete `workflow_di
 | `ai_model` | no | `gamma4` | LLM model name to use. |
 | `reference` | yes | — | User reference option: `low`, `med`, or `high`. Controls analysis depth/strictness. Expected to come from a `workflow_dispatch` input. |
 | `tags` | yes | — | Repository checkout branch/tag (git ref) to analyze. Expected to come from a `workflow_dispatch` input. |
+| `analyzer_result_file` | no | `""` | Optional path to a JSON file containing a pre-computed analyzer result. When set, the action skips the `SERVICE_URL` trigger/poll/submit steps (1a, 1b, 1k) and loads the analyzer result from this file instead. Intended for testing. |
+
 
 ## Outputs
 
@@ -59,6 +61,34 @@ The action runs a Python orchestration script (`scripts/analyzer.py`) that perfo
 ### Error handling
 
 If any step **1b–1j** fails, the script calls `POST {SERVICE_URL}/runs/{run_id}/error` with the failing step and error message (spec step 2a), then exits with a non-zero code so the workflow fails.
+
+## Testing / local mode (file-based analyzer result)
+
+For testing, you can bypass the `SERVICE_URL` analyzer service and supply a pre-computed analyzer result directly. Set the `analyzer_result_file` input to the path of a JSON file containing the analyzer result object:
+
+```yaml
+- name: pprof analyzer
+  id: pprof
+  uses: <this-module-repo>@<this-module-version>
+  with:
+    token: ${{ secrets.GITHUB_TOKEN }}
+    ai_endpoint: ${{ secrets.AI_ENDPOINT }}
+    ai_key: ${{ secrets.AI_KEY }}
+    ai_model: gamma4
+    reference: ${{ inputs.reference }}
+    tags: ${{ inputs.tags }}
+    analyzer_result_file: ./test-data/analyzer_result.json
+```
+
+When `analyzer_result_file` is set:
+
+- Steps **1a** (trigger) and **1b** (poll) are skipped; the result is loaded from the given JSON file.
+- Step **1k** (submit) and the **2a** error-flag call are skipped (no run is registered with the service).
+- A local `run_id` of the form `local-<timestamp>` is generated so branch naming and outputs still work.
+- All remaining steps (1c–1j) run as normal.
+
+When `analyzer_result_file` is unset (the default), the normal `SERVICE_URL` flow is used unchanged.
+
 
 ## SERVICE_URL REST contract
 

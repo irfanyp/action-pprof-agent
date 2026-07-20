@@ -159,8 +159,36 @@ def poll_analyzer_result(run_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Step 1b (file mode) — Load analyzer result from a local JSON file
+# ---------------------------------------------------------------------------
+
+def load_analyzer_result_from_file(path_str: str) -> dict:
+    """Load a pre-computed analyzer result from a JSON file (testing mode).
+
+    Replaces steps 1a (trigger) and 1b (poll) when ANALYZER_RESULT_FILE is set.
+    """
+    path = Path(path_str)
+    if not path.is_file():
+        raise AnalyzerError("1b", f"Analyzer result file not found: {path}")
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise AnalyzerError("1b", f"Failed to parse analyzer result file as JSON: {exc}") from exc
+    if not isinstance(result, dict):
+        raise AnalyzerError("1b", f"Analyzer result file must contain a JSON object, got {type(result).__name__}")
+    print(f"[1b] Loaded analyzer result from {path} ({len(result)} top-level keys).")
+    return result
+
+
+def local_run_id() -> str:
+    """Generate a deterministic run_id for file-based (testing) runs."""
+    return f"local-{int(time.time())}"
+
+
+# ---------------------------------------------------------------------------
 # Step 1c — Verify / prepare git checkout
 # ---------------------------------------------------------------------------
+
 
 def prepare_git_checkout(tags: str) -> git.Repo:
     """Ensure we are on the requested branch and the repo is usable."""
@@ -420,22 +448,37 @@ def main() -> int:
     action_path = Path(os.environ["ACTION_PATH"])
     prompt_template = action_path / "scripts" / "prompts" / "prompt_template.txt"
 
+    # File-based (testing) mode: when ANALYZER_RESULT_FILE is set, load the
+    # analyzer result from a local JSON file and skip all SERVICE_URL
+    # interactions (steps 1a trigger, 1b poll, 1k submit, and 2a error-flag).
+    analyzer_result_file = os.environ.get("ANALYZER_RESULT_FILE", "").strip()
+    file_mode = bool(analyzer_result_file)
+
     run_id = None
 
-    # --- Step 1a: trigger ---------------------------------------------------
-    try:
-        run_id = trigger_analyzer(reference, tags, repository)
+    # --- Step 1a: trigger (skipped in file mode) ----------------------------
+    if file_mode:
+        run_id = local_run_id()
         _set_output("run_id", run_id)
-    except Exception as exc:  # noqa: BLE001
-        # 1a is outside the 1b-1j error-flag window; just fail.
-        print(f"ERROR during step 1a: {exc}", file=sys.stderr)
-        return 1
+        print(f"[1a] File mode: skipping SERVICE_URL trigger. Using local run_id={run_id}")
+    else:
+        try:
+            run_id = trigger_analyzer(reference, tags, repository)
+            _set_output("run_id", run_id)
+        except Exception as exc:  # noqa: BLE001
+            # 1a is outside the 1b-1j error-flag window; just fail.
+            print(f"ERROR during step 1a: {exc}", file=sys.stderr)
+            return 1
 
     # --- Steps 1b-1j (wrapped for error flagging) ---------------------------
     try:
-        # 1b — poll for result
-        analyzer_result = poll_analyzer_result(run_id)
+        # 1b — obtain analyzer result (poll SERVICE_URL, or load from file)
+        if file_mode:
+            analyzer_result = load_analyzer_result_from_file(analyzer_result_file)
+        else:
+            analyzer_result = poll_analyzer_result(run_id)
         _write_artifact("analyzer_result.json", json.dumps(analyzer_result, indent=2))
+
 
         # 1c — prepare git checkout
         repo = prepare_git_checkout(tags)
@@ -465,20 +508,26 @@ def main() -> int:
 
     except AnalyzerError as exc:
         print(f"ERROR during step {exc.step}: {exc.message}", file=sys.stderr)
-        # 2a — flag error
-        flag_error(run_id, exc.step, exc.message)
+        # 2a — flag error (skipped in file mode; no SERVICE_URL run registered)
+        if not file_mode:
+            flag_error(run_id, exc.step, exc.message)
         return 1
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR during steps 1b-1j: {exc}", file=sys.stderr)
-        flag_error(run_id, "unknown", str(exc))
+        if not file_mode:
+            flag_error(run_id, "unknown", str(exc))
         return 1
 
-    # --- Step 1k: flag submitted -------------------------------------------
-    try:
-        flag_submitted(run_id, pr_url, pr_number)
-    except Exception as exc:  # noqa: BLE001
-        # PR was created; failure to flag is non-fatal but should be visible.
-        print(f"WARNING: failed to flag run {run_id} as submitted: {exc}", file=sys.stderr)
+    # --- Step 1k: flag submitted (skipped in file mode) --------------------
+    if file_mode:
+        print("[1k] File mode: skipping SERVICE_URL submit flag.")
+    else:
+        try:
+            flag_submitted(run_id, pr_url, pr_number)
+        except Exception as exc:  # noqa: BLE001
+            # PR was created; failure to flag is non-fatal but should be visible.
+            print(f"WARNING: failed to flag run {run_id} as submitted: {exc}", file=sys.stderr)
+
 
     print("pprof-analyzer completed successfully.")
     return 0
