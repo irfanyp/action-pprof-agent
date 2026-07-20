@@ -89,9 +89,16 @@ runs:
     # ---------------------------------------------------------------------
     - name: Configure git
       shell: bash
+      env:
+        GITHUB_SERVER_URL: ${{ github.server_url }}
       run: |
+        # Derive the GitHub host from the server URL so the noreply email
+        # is correct on GitHub Enterprise Server (e.g. github.example.com)
+        # and not hardcoded to github.com.
+        GH_HOST=$(printf '%s' "${GITHUB_SERVER_URL:-https://github.com}" \
+          | sed -E 's#^[a-zA-Z]+://##; s#[:/].*##')
         git config --global user.name  "pprof-analyzer[bot]"
-        git config --global user.email "pprof-analyzer[bot]@users.noreply.github.com"
+        git config --global user.email "pprof-analyzer[bot]@${GH_HOST}"
 
     # ---------------------------------------------------------------------
     # 1a-1k. Run the analyzer orchestration script.
@@ -108,6 +115,7 @@ runs:
         TAGS: ${{ inputs.tags }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         GITHUB_WORKSPACE: ${{ github.workspace }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         python "${ACTION_PATH}/scripts/analyzer.py"

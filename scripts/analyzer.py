@@ -39,6 +39,13 @@ from openai import OpenAI
 # SERVICE_URL is hardcoded in the action (per spec).
 SERVICE_URL = "https://analyzer.internal/api/v1"
 
+# Base URL of the GitHub instance running the workflow.
+# On public GitHub this is "https://github.com"; on GitHub Enterprise Server
+# it is the instance URL (e.g. "https://github.example.com").
+# Provided by the runner via the `github.server_url` context.
+GITHUB_SERVER_URL = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+
+
 # Polling configuration for step 1b.
 POLL_INTERVAL_SECONDS = 15
 POLL_TIMEOUT_SECONDS = 10 * 60  # 10 minutes

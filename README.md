@@ -73,6 +73,21 @@ If any step **1b–1j** fails, the script calls `POST {SERVICE_URL}/runs/{run_id
 
 Polling statuses: `pending` → `running` → `completed` | `error`.
 
+## GitHub Enterprise Server support
+
+The action auto-detects the GitHub instance it runs on via the built-in
+[`github.server_url`](https://docs.github.com/actions/learn-github-actions/contexts#github-context)
+context (exposed to the script as `GITHUB_SERVER_URL`). No extra input is required.
+
+- **Commit author email** is derived from the instance host
+  (e.g. `pprof-analyzer[bot]@github.example.com` on GHES) instead of being
+  hardcoded to `noreply.github.com`.
+- **PR creation** uses the `gh` CLI, which resolves the host from the `origin`
+  remote configured by `actions/checkout` and authenticates with `GITHUB_TOKEN`,
+  so it works against any GitHub instance out of the box.
+
+On public `github.com` the behavior is unchanged.
+
 ## Pre-requisites
 
 The composite action installs everything it needs:
