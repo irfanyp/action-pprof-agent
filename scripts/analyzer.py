@@ -489,6 +489,8 @@ def main() -> int:
 
         # 1e — construct prompt
         prompt = construct_prompt(prompt_template, reference, analyzer_result, repomix)
+        _write_artifact("prompt.txt", prompt)
+        _set_output("prompt", prompt)
 
         # 1f — feed to LLM
         llm_result = call_llm(prompt)

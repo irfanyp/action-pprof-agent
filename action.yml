@@ -54,6 +54,9 @@ outputs:
   pr_number:
     description: 'Number of the created Pull Request (empty if none was created).'
     value: ${{ steps.analyzer.outputs.pr_number }}
+  prompt:
+    description: 'The fully-constructed prompt that was sent to the LLM (empty if not constructed).'
+    value: ${{ steps.analyzer.outputs.prompt }}
 
 runs:
   using: 'composite'
@@ -164,6 +167,14 @@ runs:
       with:
         name: analyzer-result
         path: artifacts/analyzer_result.json
+        if-no-files-found: ignore
+
+    - name: Upload constructed prompt artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: prompt
+        path: artifacts/prompt.txt
         if-no-files-found: ignore
 
     # ---------------------------------------------------------------------
