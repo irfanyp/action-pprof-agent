@@ -1,0 +1,51 @@
+# Example caller workflow for the pprof-analyzer action.
+#
+# Place this file in your repository at .github/workflows/pprof-analyzer.yml
+# and trigger it manually from the "Actions" tab (workflow_dispatch).
+
+name: pprof-analyzer
+
+on:
+  workflow_dispatch:
+    inputs:
+      # User reference option — controls analysis depth/strictness.
+      reference:
+        description: 'Reference level (low | med | high)'
+        type: choice
+        options:
+          - low
+          - med
+          - high
+        required: true
+        default: med
+      # Repository checkout branch/tag to analyze.
+      tags:
+        description: 'Repository branch/tag to check out and analyze'
+        type: string
+        required: true
+        default: main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: pprof analyzer
+        id: pprof
+        uses: <this-module-repo>@<this-module-version>
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ai_endpoint: ${{ secrets.AI_ENDPOINT }}
+          ai_key: ${{ secrets.AI_KEY }}
+          ai_model: gamma4
+          reference: ${{ inputs.reference }}
+          tags: ${{ inputs.tags }}
+
+      - name: Show results
+        run: |
+          echo "Run ID:  ${{ steps.pprof.outputs.run_id }}"
+          echo "PR URL:  ${{ steps.pprof.outputs.pr_url }}"
+          echo "PR #:    ${{ steps.pprof.outputs.pr_number }}"

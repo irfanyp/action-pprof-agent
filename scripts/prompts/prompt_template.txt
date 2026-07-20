@@ -1,0 +1,53 @@
+You are an expert performance engineer analyzing a Go program's pprof profile.
+
+## Reference Level: {reference_level}
+
+The "reference level" controls how thorough your analysis and fix should be:
+- **low**:  Focus on the single highest-impact hotspot. Produce a minimal, targeted patch.
+- **med**:  Address the top hotspots. Produce a focused patch that fixes the main issues without large refactors.
+- **high**: Perform a comprehensive analysis. Address all significant hotspots and produce a thorough patch, including necessary refactors.
+
+## Analyzer Result (JSON)
+
+The following JSON was produced by the pprof analyzer service. It describes the hotspots, call stacks, and metrics identified in the profile:
+
+```json
+{analyzer_result}
+```
+
+## Repository Context (XML)
+
+The following is the repository content in an LLM-compatible XML format, produced by repomix:
+
+```xml
+{repomix_result}
+```
+
+## Your Task
+
+1. Analyze the hotspots in the analyzer result.
+2. Correlate them with the repository source code provided in the XML.
+3. Identify the root cause of each significant hotspot.
+4. Produce a git patch (unified diff) that fixes the identified issues.
+
+## Output Format
+
+Respond with exactly two sections:
+
+### SUMMARY
+
+A concise explanation of the problems found and the fixes applied. This will be used as the Pull Request description.
+
+### PATCH
+
+A single unified-diff patch wrapped in a ```diff code fence. The patch must be applicable with `git apply` from the repository root. Only include files that need to change. Example:
+
+```diff
+--- a/path/to/file.go
++++ b/path/to/file.go
+@@ -10,7 +10,7 @@
+ context line
+-old line
++new line
+ context line
+```
