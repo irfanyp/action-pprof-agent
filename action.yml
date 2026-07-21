@@ -88,20 +88,23 @@ runs:
         pip install --no-cache-dir -r ${{ github.action_path }}/scripts/requirements.txt
 
     # ---------------------------------------------------------------------
-    # Pre-requisite: Node + repomix
+    # Pre-requisite: Node + repomix + pprof-to-md
+    #
+    # Both tools are pinned in package.json / package-lock.json at the repo
+    # root and installed reproducibly via `npm ci`. Versions are kept up to
+    # date automatically by Dependabot (npm ecosystem, see
+    # .github/dependabot.yml). Do NOT use `npm install -g` here — Dependabot
+    # cannot track global installs.
     # ---------------------------------------------------------------------
     - name: Setup Node
       uses: actions/setup-node@v7
       with:
         node-version: '20'
 
-    - name: Install repomix
+    - name: Install Node tooling (repomix, pprof-to-md)
       shell: bash
-      run: npm install -g repomix
-
-    - name: Install pprof-to-md
-      shell: bash
-      run: npm install -g pprof-to-md
+      working-directory: ${{ github.action_path }}
+      run: npm ci --omit=dev
 
 
     # ---------------------------------------------------------------------

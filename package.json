@@ -1,0 +1,10 @@
+{
+  "name": "pprof-analyzer-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned npm tooling (repomix, pprof-to-md) for the pprof-analyzer GitHub Action. Versions are managed by Dependabot.",
+  "dependencies": {
+    "repomix": "^1.16.1",
+    "pprof-to-md": "^0.2.0"
+  }
+}

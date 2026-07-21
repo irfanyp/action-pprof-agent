@@ -1,0 +1,13 @@
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# Local action artifacts
+artifacts/
+repomix-output/
+
+# IDE / tooling
+.workspace_rag/
