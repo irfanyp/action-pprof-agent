@@ -50,7 +50,7 @@ The action runs a Python orchestration script (`scripts/analyzer.py`) that perfo
 | **1a** | `POST {SERVICE_URL}/runs` — authenticate and trigger the analyzer execution. Returns a `run_id`. |
 | **1b** | `GET {SERVICE_URL}/runs/{run_id}` — poll periodically (every 15s, timeout 10 min) until the analyzer result is ready. The completed response carries a base64-encoded raw pprof profile (e.g. `*.pb.gz`) in the `result` field. The profile is decoded and converted to LLM-friendly markdown via `pprof-to-md`. |
 | **1c** | Verify the git checkout is on the requested branch/tag. |
-| **1d** | Run `npx repomix --style xml` to generate an LLM-compatible XML of the repository. |
+| **1d** | Run `repomix --style xml` to generate an LLM-compatible XML of the repository. |
 | **1e** | Construct the prompt from the template, analyzer result (markdown), repomix XML, and reference level. |
 | **1f** | Feed the prompt to the LLM via the OpenAI-compatible endpoint. |
 | **1g** | Extract the `git patch` (unified diff) and summary from the LLM result. |
@@ -127,8 +127,8 @@ On public `github.com` the behavior is unchanged.
 
 The composite action installs everything it needs:
 
-- **repomix** — installed globally via `npm install -g repomix`.
-- **pprof-to-md** — installed globally via `npm install -g pprof-to-md`. Converts raw pprof profiles (`.pb.gz`) to LLM-friendly markdown.
+- **repomix** — pinned in `package.json` and installed reproducibly via `npm ci` from `package-lock.json`. Versions are kept up to date automatically by Dependabot (npm ecosystem).
+- **pprof-to-md** — pinned in `package.json` and installed reproducibly via `npm ci` from `package-lock.json`. Converts raw pprof profiles (`.pb.gz`) to LLM-friendly markdown. Versions are kept up to date automatically by Dependabot (npm ecosystem).
 - **Python 3.11** — via `actions/setup-python`; dependencies (`openai`, `GitPython`, `requests`) installed from `scripts/requirements.txt`.
 - **git** — available on GitHub runners; the action configures a bot identity for commits.
 - **gh CLI** — pre-installed on GitHub-hosted runners, used for PR creation.
@@ -143,6 +143,10 @@ A `post`-style cleanup step (runs with `if: always()`) removes temporary artifac
 ```
 pprof-analyzer/
 ├── action.yml                       # Composite action definition
+├── package.json                     # Pinned npm tooling (repomix, pprof-to-md)
+├── package-lock.json                # Reproducible npm installs (npm ci)
+├── .github/
+│   └── dependabot.yml               # Auto-updates: github-actions, pip, npm
 ├── scripts/
 │   ├── analyzer.py                  # Main orchestration script
 │   ├── requirements.txt             # Python dependencies

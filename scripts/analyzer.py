@@ -6,7 +6,7 @@ Implements the flow described in the action spec:
   1a  Trigger analyzer execution via SERVICE_URL.
   1b  Poll SERVICE_URL for the analyzer result.
   1c  Verify / prepare the git checkout branch.
-  1d  Run `npx repomix` to produce an LLM-compatible XML of the repo.
+  1d  Run `repomix` to produce an LLM-compatible XML of the repo.
   1e  Construct the prompt.
   1f  Feed the prompt to the LLM.
   1g  Extract the git patch from the LLM result.
@@ -103,6 +103,27 @@ def _set_output(name: str, value: str) -> None:
             fh.write(f"{name}={value}\n")
 
 
+def _node_bin(name: str) -> str:
+    """Resolve an npm-installed CLI binary from the action's local node_modules.
+
+    The composite action runs ``npm ci`` in ``${ACTION_PATH}`` (see action.yml),
+    which installs ``repomix`` and ``pprof-to-md`` into
+    ``${ACTION_PATH}/node_modules/.bin``. This helper returns the absolute path
+    to the requested binary so the analyzer can invoke the exact pinned version
+    regardless of the current working directory or global PATH.
+
+    Using the local binary (instead of ``npx --yes <pkg>``) avoids a network
+    re-resolve at runtime and guarantees the version pinned in
+    ``package-lock.json`` is the one that runs.
+    """
+    action_path = os.environ.get("ACTION_PATH", "")
+    if not action_path:
+        # Fall back to a bare command (assumes it is on PATH).
+        return name
+    candidate = Path(action_path) / "node_modules" / ".bin" / name
+    return str(candidate)
+
+
 def _decode_pprof_result(result: str) -> Path:
     """Decode a base64-encoded raw pprof profile and write it to disk.
 
@@ -134,7 +155,7 @@ def convert_pprof_to_markdown(pprof_path: Path) -> str:
     _ensure_artifacts_dir()
     out_file = ARTIFACTS_DIR / "analyzer_result.md"
     cmd = [
-        "pprof-to-md",
+        _node_bin("pprof-to-md"),
         "--format", "detailed",
         str(pprof_path),
         "-o", str(out_file),
@@ -267,12 +288,17 @@ def prepare_git_checkout(tags: str) -> git.Repo:
 # ---------------------------------------------------------------------------
 
 def run_repomix() -> str:
-    """Run `npx repomix` to produce an XML representation of the repo."""
+    """Run `repomix` to produce an XML representation of the repo.
+
+    Uses the locally-installed (pinned) binary from ``${ACTION_PATH}/node_modules/.bin``
+    rather than ``npx --yes repomix``. This avoids a network re-resolve at
+    runtime and guarantees the version pinned in ``package-lock.json`` runs.
+    """
     REPOMIX_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out_file = REPOMIX_OUTPUT_DIR / "repomix.xml"
 
     cmd = [
-        "npx", "--yes", "repomix",
+        _node_bin("repomix"),
         "--style", "xml",
         "--output", str(out_file),
     ]

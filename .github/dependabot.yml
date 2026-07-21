@@ -23,3 +23,15 @@ updates:
     labels:
       - "dependencies"
       - "python"
+
+  # Keep npm tooling (repomix, pprof-to-md) in package.json up to date
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(npm-deps)"
+    labels:
+      - "dependencies"
+      - "npm"
