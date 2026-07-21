@@ -151,54 +151,19 @@ runs:
 
     # ---------------------------------------------------------------------
     # 1i. Upload artifacts.
+    #
+    # All analyzer outputs are bundled into a single artifact for simpler
+    # downloads, less storage/metadata overhead, and easier maintenance.
+    # Partial contents (e.g. a missing raw_profile.pb.gz when
+    # analyzer_result_file is set) are handled naturally — whatever
+    # exists under artifacts/ is what gets zipped.
     # ---------------------------------------------------------------------
-    - name: Upload patch artifact
+    - name: Upload analyzer artifacts
       if: always()
       uses: actions/upload-artifact@v7
       with:
-        name: patch
-        path: artifacts/patch.diff
-        if-no-files-found: ignore
-
-    - name: Upload raw LLM result artifact
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: llm-result
-        path: artifacts/llm_result.txt
-        if-no-files-found: ignore
-
-    - name: Upload raw repomix result artifact
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: repomix-result
-        path: artifacts/repomix_result.xml
-        if-no-files-found: ignore
-
-    - name: Upload analyzer result (markdown) artifact
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: analyzer-result
-        path: artifacts/analyzer_result.md
-        if-no-files-found: ignore
-
-    - name: Upload raw pprof profile artifact
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: raw-profile
-        path: artifacts/raw_profile.pb.gz
-        if-no-files-found: ignore
-
-
-    - name: Upload constructed prompt artifact
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: prompt
-        path: artifacts/prompt.txt
+        name: analyzer-artifacts
+        path: artifacts/
         if-no-files-found: ignore
 
     # ---------------------------------------------------------------------
