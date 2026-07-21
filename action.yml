@@ -147,7 +147,7 @@ runs:
     # ---------------------------------------------------------------------
     - name: Upload patch artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: patch
         path: artifacts/patch.diff
@@ -155,7 +155,7 @@ runs:
 
     - name: Upload raw LLM result artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: llm-result
         path: artifacts/llm_result.txt
@@ -163,7 +163,7 @@ runs:
 
     - name: Upload raw repomix result artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: repomix-result
         path: artifacts/repomix_result.xml
@@ -171,7 +171,7 @@ runs:
 
     - name: Upload analyzer result (markdown) artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: analyzer-result
         path: artifacts/analyzer_result.md
@@ -179,7 +179,7 @@ runs:
 
     - name: Upload raw pprof profile artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: raw-profile
         path: artifacts/raw_profile.pb.gz
@@ -188,7 +188,7 @@ runs:
 
     - name: Upload constructed prompt artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: prompt
         path: artifacts/prompt.txt
