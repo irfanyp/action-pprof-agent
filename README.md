@@ -29,7 +29,8 @@ See [`examples/workflow.yml`](examples/workflow.yml) for a complete `workflow_di
 | `ai_model` | no | `gamma4` | LLM model name to use. |
 | `reference` | yes | — | User reference option: `low`, `med`, or `high`. Controls analysis depth/strictness. Expected to come from a `workflow_dispatch` input. |
 | `tags` | yes | — | Repository checkout branch/tag (git ref) to analyze. Expected to come from a `workflow_dispatch` input. |
-| `analyzer_result_file` | no | `""` | Optional path to a JSON file containing a pre-computed analyzer result. When set, the action skips the `SERVICE_URL` trigger/poll/submit steps (1a, 1b, 1k) and loads the analyzer result from this file instead. Intended for testing. |
+| `analyzer_result_file` | no | `""` | Optional path to a raw pprof profile file (e.g. `pprof.pprof-dummy-go.samples.cpu.001.pb.gz`). When set, the action skips the `SERVICE_URL` trigger/poll/submit steps (1a, 1b, 1k) and loads the raw pprof profile from this file instead. The profile is then converted to markdown via `pprof-to-md`. Intended for testing. |
+
 
 
 ## Outputs
@@ -47,24 +48,25 @@ The action runs a Python orchestration script (`scripts/analyzer.py`) that perfo
 | Step | Description |
 |---|---|
 | **1a** | `POST {SERVICE_URL}/runs` — authenticate and trigger the analyzer execution. Returns a `run_id`. |
-| **1b** | `GET {SERVICE_URL}/runs/{run_id}` — poll periodically (every 15s, timeout 10 min) until the analyzer result is ready. |
+| **1b** | `GET {SERVICE_URL}/runs/{run_id}` — poll periodically (every 15s, timeout 10 min) until the analyzer result is ready. The completed response carries a base64-encoded raw pprof profile (e.g. `*.pb.gz`) in the `result` field. The profile is decoded and converted to LLM-friendly markdown via `pprof-to-md`. |
 | **1c** | Verify the git checkout is on the requested branch/tag. |
 | **1d** | Run `npx repomix --style xml` to generate an LLM-compatible XML of the repository. |
-| **1e** | Construct the prompt from the template, analyzer result, repomix XML, and reference level. |
+| **1e** | Construct the prompt from the template, analyzer result (markdown), repomix XML, and reference level. |
 | **1f** | Feed the prompt to the LLM via the OpenAI-compatible endpoint. |
 | **1g** | Extract the `git patch` (unified diff) and summary from the LLM result. |
 | **1h** | Apply the patch with `git apply`. |
-| **1i** | Write artifacts (`patch.diff`, `llm_result.txt`, `repomix_result.xml`, `analyzer_result.json`) to `./artifacts/`; the composite action uploads them as workflow artifacts. |
+| **1i** | Write artifacts (`patch.diff`, `llm_result.txt`, `repomix_result.xml`, `analyzer_result.md`, `raw_profile.pb.gz`) to `./artifacts/`; the composite action uploads them as workflow artifacts. |
 | **1j** | Create a new branch, commit, push, and open a Pull Request via `gh pr create`. The PR description is derived from the LLM summary. |
 | **1k** | `POST {SERVICE_URL}/runs/{run_id}/submit` — flag the execution as done/submitted. |
+
 
 ### Error handling
 
 If any step **1b–1j** fails, the script calls `POST {SERVICE_URL}/runs/{run_id}/error` with the failing step and error message (spec step 2a), then exits with a non-zero code so the workflow fails.
 
-## Testing / local mode (file-based analyzer result)
+## Testing / local mode (file-based raw pprof profile)
 
-For testing, you can bypass the `SERVICE_URL` analyzer service and supply a pre-computed analyzer result directly. Set the `analyzer_result_file` input to the path of a JSON file containing the analyzer result object:
+For testing, you can bypass the `SERVICE_URL` analyzer service and supply a raw pprof profile directly. Set the `analyzer_result_file` input to the path of a raw pprof profile file (e.g. `*.pb.gz`):
 
 ```yaml
 - name: pprof analyzer
@@ -77,17 +79,19 @@ For testing, you can bypass the `SERVICE_URL` analyzer service and supply a pre-
     ai_model: gamma4
     reference: ${{ inputs.reference }}
     tags: ${{ inputs.tags }}
-    analyzer_result_file: ./test-data/analyzer_result.json
+    analyzer_result_file: ./test-data/pprof.pprof-dummy-go.samples.cpu.001.pb.gz
 ```
 
 When `analyzer_result_file` is set:
 
-- Steps **1a** (trigger) and **1b** (poll) are skipped; the result is loaded from the given JSON file.
+- Steps **1a** (trigger) and **1b** (poll) are skipped; the raw pprof profile is loaded from the given file.
+- The raw profile is converted to LLM-friendly markdown via `pprof-to-md` (same as the `SERVICE_URL` flow).
 - Step **1k** (submit) and the **2a** error-flag call are skipped (no run is registered with the service).
 - A local `run_id` of the form `local-<timestamp>` is generated so branch naming and outputs still work.
 - All remaining steps (1c–1j) run as normal.
 
 When `analyzer_result_file` is unset (the default), the normal `SERVICE_URL` flow is used unchanged.
+
 
 
 ## SERVICE_URL REST contract
@@ -97,9 +101,10 @@ When `analyzer_result_file` is unset (the default), the normal `SERVICE_URL` flo
 | Step | Method & Path | Request body | Response |
 |---|---|---|---|
 | 1a trigger | `POST /runs` | `{"reference":"low","tags":"main","repository":"owner/repo"}` | `{"run_id":"...","status":"pending"}` |
-| 1b poll | `GET /runs/{run_id}` | — | `{"run_id":"...","status":"completed","result":{...}}` |
+| 1b poll | `GET /runs/{run_id}` | — | `{"run_id":"...","status":"completed","result":"<base64-encoded .pb.gz>"}` |
 | 1k submit | `POST /runs/{run_id}/submit` | `{"pr_url":"...","pr_number":123}` | `{"status":"submitted"}` |
 | 2a error | `POST /runs/{run_id}/error` | `{"step":"1f","error":"..."}` | `{"status":"error"}` |
+
 
 Polling statuses: `pending` → `running` → `completed` | `error`.
 
@@ -123,9 +128,11 @@ On public `github.com` the behavior is unchanged.
 The composite action installs everything it needs:
 
 - **repomix** — installed globally via `npm install -g repomix`.
+- **pprof-to-md** — installed globally via `npm install -g pprof-to-md`. Converts raw pprof profiles (`.pb.gz`) to LLM-friendly markdown.
 - **Python 3.11** — via `actions/setup-python`; dependencies (`openai`, `GitPython`, `requests`) installed from `scripts/requirements.txt`.
 - **git** — available on GitHub runners; the action configures a bot identity for commits.
 - **gh CLI** — pre-installed on GitHub-hosted runners, used for PR creation.
+
 
 ## Cleanup
 

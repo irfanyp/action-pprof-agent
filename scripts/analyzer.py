@@ -20,13 +20,15 @@ If any step 1b-1j fails, step 2a flags the execution as error via SERVICE_URL.
 
 from __future__ import annotations
 
-import json
+import base64
 import os
 import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+
 
 import git
 import requests
@@ -101,6 +103,57 @@ def _set_output(name: str, value: str) -> None:
             fh.write(f"{name}={value}\n")
 
 
+def _decode_pprof_result(result: str) -> Path:
+    """Decode a base64-encoded raw pprof profile and write it to disk.
+
+    The SERVICE_URL poll response carries the raw pprof bytes (e.g.
+    ``*.pb.gz``) as a base64 string in the ``result`` field. This helper
+    decodes the bytes and writes them to ``artifacts/raw_profile.pb.gz``.
+    """
+    _ensure_artifacts_dir()
+    out_path = ARTIFACTS_DIR / "raw_profile.pb.gz"
+    try:
+        raw_bytes = base64.b64decode(result)
+    except Exception as exc:  # noqa: BLE001
+        raise AnalyzerError("1b", f"Failed to base64-decode pprof result: {exc}") from exc
+    if not raw_bytes:
+        raise AnalyzerError("1b", "Decoded pprof result is empty.")
+    out_path.write_bytes(raw_bytes)
+    print(f"[1b] Wrote {len(raw_bytes)} bytes of raw pprof to {out_path}.")
+    return out_path
+
+
+def convert_pprof_to_markdown(pprof_path: Path) -> str:
+    """Convert a raw pprof profile to LLM-friendly markdown via ``pprof-to-md``.
+
+    Uses the ``detailed`` format (full call tree with function details) and
+    includes source-code context for the hot functions so the LLM can see the
+    exact lines where CPU time is spent. The output is written to
+    ``artifacts/analyzer_result.md`` via ``-o`` and read back.
+    """
+    _ensure_artifacts_dir()
+    out_file = ARTIFACTS_DIR / "analyzer_result.md"
+    cmd = [
+        "pprof-to-md",
+        "--format", "detailed",
+        str(pprof_path),
+        "-o", str(out_file),
+    ]
+    print(f"[1b] Converting pprof to markdown: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise AnalyzerError("1b", f"pprof-to-md failed: {result.stderr}")
+    if not out_file.exists():
+        raise AnalyzerError("1b", f"pprof-to-md did not produce output file: {out_file}")
+    markdown = out_file.read_text(encoding="utf-8")
+    if not markdown.strip():
+        raise AnalyzerError("1b", "pprof-to-md produced empty output.")
+    print(f"[1b] pprof-to-md produced {len(markdown)} chars of markdown.")
+    return markdown
+
+
+
+
 # ---------------------------------------------------------------------------
 # Step 1a — Trigger analyzer execution
 # ---------------------------------------------------------------------------
@@ -131,8 +184,13 @@ def trigger_analyzer(reference: str, tags: str, repository: str) -> str:
 # Step 1b — Poll for analyzer result
 # ---------------------------------------------------------------------------
 
-def poll_analyzer_result(run_id: str) -> dict:
-    """GET /runs/{run_id} periodically until status == completed."""
+def poll_analyzer_result(run_id: str) -> Path:
+    """GET /runs/{run_id} periodically until status == completed.
+
+    The completed response carries a base64-encoded raw pprof profile
+    (e.g. ``*.pb.gz``) in the ``result`` field. The bytes are decoded and
+    written to ``artifacts/raw_profile.pb.gz``; the path is returned.
+    """
     url = f"{SERVICE_URL}/runs/{run_id}"
     deadline = time.time() + POLL_TIMEOUT_SECONDS
     last_status = None
@@ -147,9 +205,12 @@ def poll_analyzer_result(run_id: str) -> dict:
             last_status = status
 
         if status == "completed":
-            result = data.get("result", {})
-            print(f"[1b] Analyzer completed.")
-            return result
+            result = data.get("result", "")
+            if not result:
+                raise AnalyzerError("1b", f"Analyzer completed but 'result' is empty: {data}")
+            pprof_path = _decode_pprof_result(result)
+            print(f"[1b] Analyzer completed. Raw pprof written to {pprof_path}.")
+            return pprof_path
         if status == "error":
             raise AnalyzerError("1b", f"Analyzer reported error: {data}")
 
@@ -159,25 +220,21 @@ def poll_analyzer_result(run_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Step 1b (file mode) — Load analyzer result from a local JSON file
+# Step 1b (file mode) — Load a raw pprof profile from a local file
 # ---------------------------------------------------------------------------
 
-def load_analyzer_result_from_file(path_str: str) -> dict:
-    """Load a pre-computed analyzer result from a JSON file (testing mode).
+def load_analyzer_result_from_file(path_str: str) -> Path:
+    """Load a raw pprof profile file (e.g. ``*.pb.gz``) for testing mode.
 
     Replaces steps 1a (trigger) and 1b (poll) when ANALYZER_RESULT_FILE is set.
+    The file is expected to be a raw pprof profile, not JSON.
     """
     path = Path(path_str)
     if not path.is_file():
         raise AnalyzerError("1b", f"Analyzer result file not found: {path}")
-    try:
-        result = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise AnalyzerError("1b", f"Failed to parse analyzer result file as JSON: {exc}") from exc
-    if not isinstance(result, dict):
-        raise AnalyzerError("1b", f"Analyzer result file must contain a JSON object, got {type(result).__name__}")
-    print(f"[1b] Loaded analyzer result from {path} ({len(result)} top-level keys).")
-    return result
+    print(f"[1b] Loaded raw pprof profile from {path} ({path.stat().st_size} bytes).")
+    return path
+
 
 
 def local_run_id() -> str:
@@ -236,15 +293,16 @@ def run_repomix() -> str:
 # Step 1e — Construct prompt
 # ---------------------------------------------------------------------------
 
-def construct_prompt(template_path: Path, reference: str, analyzer_result: dict, repomix: str) -> str:
+def construct_prompt(template_path: Path, reference: str, analyzer_result: str, repomix: str) -> str:
     template = template_path.read_text(encoding="utf-8")
     prompt = template.format(
         reference_level=reference,
-        analyzer_result=json.dumps(analyzer_result, indent=2),
+        analyzer_result=analyzer_result,
         repomix_result=repomix,
     )
     print(f"[1e] Prompt constructed ({len(prompt)} chars).")
     return prompt
+
 
 
 # ---------------------------------------------------------------------------
@@ -448,11 +506,12 @@ def main() -> int:
     action_path = Path(os.environ["ACTION_PATH"])
     prompt_template = action_path / "scripts" / "prompts" / "prompt_template.txt"
 
-    # File-based (testing) mode: when ANALYZER_RESULT_FILE is set, load the
-    # analyzer result from a local JSON file and skip all SERVICE_URL
+    # File-based (testing) mode: when ANALYZER_RESULT_FILE is set, load a
+    # raw pprof profile from a local file and skip all SERVICE_URL
     # interactions (steps 1a trigger, 1b poll, 1k submit, and 2a error-flag).
     analyzer_result_file = os.environ.get("ANALYZER_RESULT_FILE", "").strip()
     file_mode = bool(analyzer_result_file)
+
 
     run_id = None
 
@@ -472,16 +531,25 @@ def main() -> int:
 
     # --- Steps 1b-1j (wrapped for error flagging) ---------------------------
     try:
-        # 1b — obtain analyzer result (poll SERVICE_URL, or load from file)
+        # 1b — obtain raw pprof profile (poll SERVICE_URL, or load from file)
         if file_mode:
-            analyzer_result = load_analyzer_result_from_file(analyzer_result_file)
+            pprof_path = load_analyzer_result_from_file(analyzer_result_file)
         else:
-            analyzer_result = poll_analyzer_result(run_id)
-        _write_artifact("analyzer_result.json", json.dumps(analyzer_result, indent=2))
+            pprof_path = poll_analyzer_result(run_id)
+
+        # Convert the raw pprof profile to LLM-friendly markdown via
+        # pprof-to-md. The markdown replaces the old JSON analyzer result.
+        # convert_pprof_to_markdown writes directly to artifacts/analyzer_result.md
+        # via -o; the explicit _write_artifact below guarantees the artifact
+        # exists at the expected path (consistent with all other steps).
+        analyzer_result = convert_pprof_to_markdown(pprof_path)
+        _write_artifact("analyzer_result.md", analyzer_result)
 
 
         # 1c — prepare git checkout
+
         repo = prepare_git_checkout(tags)
+
 
         # 1d — run repomix
         repomix = run_repomix()

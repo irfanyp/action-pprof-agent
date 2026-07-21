@@ -36,12 +36,15 @@ inputs:
     required: true
   analyzer_result_file:
     description: |-
-      Optional path to a JSON file containing a pre-computed analyzer result.
+      Optional path to a raw pprof profile file (e.g.
+      `pprof.pprof-dummy-go.samples.cpu.001.pb.gz`).
       When set, the action skips the SERVICE_URL trigger/poll/submit steps (1a,
-      1b, 1k) and loads the analyzer result from this file instead. Intended for
+      1b, 1k) and loads the raw pprof profile from this file instead. The
+      profile is then converted to markdown via `pprof-to-md`. Intended for
       testing purposes. When unset, the normal SERVICE_URL flow is used.
     required: false
     default: ''
+
 
 
 outputs:
@@ -95,6 +98,11 @@ runs:
     - name: Install repomix
       shell: bash
       run: npm install -g repomix
+
+    - name: Install pprof-to-md
+      shell: bash
+      run: npm install -g pprof-to-md
+
 
     # ---------------------------------------------------------------------
     # Pre-requisite: git (already available on GitHub runners, but ensure config)
@@ -161,13 +169,22 @@ runs:
         path: artifacts/repomix_result.xml
         if-no-files-found: ignore
 
-    - name: Upload raw analyzer result artifact
+    - name: Upload analyzer result (markdown) artifact
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: analyzer-result
-        path: artifacts/analyzer_result.json
+        path: artifacts/analyzer_result.md
         if-no-files-found: ignore
+
+    - name: Upload raw pprof profile artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: raw-profile
+        path: artifacts/raw_profile.pb.gz
+        if-no-files-found: ignore
+
 
     - name: Upload constructed prompt artifact
       if: always()

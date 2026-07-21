@@ -7,13 +7,14 @@ The "reference level" controls how thorough your analysis and fix should be:
 - **med**:  Address the top hotspots. Produce a focused patch that fixes the main issues without large refactors.
 - **high**: Perform a comprehensive analysis. Address all significant hotspots and produce a thorough patch, including necessary refactors.
 
-## Analyzer Result (JSON)
+## Analyzer Result (Markdown)
 
-The following JSON was produced by the pprof analyzer service. It describes the hotspots, call stacks, and metrics identified in the profile:
+The following markdown was produced by converting the raw pprof profile with `pprof-to-md`. It describes the hotspots, call stacks, and metrics identified in the profile:
 
-```json
+```markdown
 {analyzer_result}
 ```
+
 
 ## Repository Context (XML)
 
