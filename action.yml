@@ -68,7 +68,7 @@ runs:
     # 1c. Checkout the repository at the specific branch/tag.
     # ---------------------------------------------------------------------
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         token: ${{ inputs.token }}
         ref: ${{ inputs.tags }}
