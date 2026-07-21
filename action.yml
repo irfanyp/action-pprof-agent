@@ -25,15 +25,27 @@ inputs:
       Must be one of: low | med | high.
       This value is expected to come from a `workflow_dispatch` input, e.g.:
         with:
-          reference: ${{ inputs.reference }}
+          reference: <value from the workflow_dispatch 'reference' input>
     required: true
   tags:
     description: |-
       The repository checkout branch/tag (git ref) to analyze.
       This value is expected to come from a `workflow_dispatch` input, e.g.:
         with:
-          tags: ${{ inputs.tags }}
+          tags: <value from the workflow_dispatch 'tags' input>
     required: true
+  analyzer_result_file:
+    description: |-
+      Optional path to a raw pprof profile file (e.g.
+      `pprof.pprof-dummy-go.samples.cpu.001.pb.gz`).
+      When set, the action skips the SERVICE_URL trigger/poll/submit steps (1a,
+      1b, 1k) and loads the raw pprof profile from this file instead. The
+      profile is then converted to markdown via `pprof-to-md`. Intended for
+      testing purposes. When unset, the normal SERVICE_URL flow is used.
+    required: false
+    default: ''
+
+
 
 outputs:
   run_id:
@@ -45,6 +57,9 @@ outputs:
   pr_number:
     description: 'Number of the created Pull Request (empty if none was created).'
     value: ${{ steps.analyzer.outputs.pr_number }}
+  prompt:
+    description: 'The fully-constructed prompt that was sent to the LLM (empty if not constructed).'
+    value: ${{ steps.analyzer.outputs.prompt }}
 
 runs:
   using: 'composite'
@@ -84,6 +99,11 @@ runs:
       shell: bash
       run: npm install -g repomix
 
+    - name: Install pprof-to-md
+      shell: bash
+      run: npm install -g pprof-to-md
+
+
     # ---------------------------------------------------------------------
     # Pre-requisite: git (already available on GitHub runners, but ensure config)
     # ---------------------------------------------------------------------
@@ -117,8 +137,10 @@ runs:
         GITHUB_WORKSPACE: ${{ github.workspace }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
         ACTION_PATH: ${{ github.action_path }}
+        ANALYZER_RESULT_FILE: ${{ inputs.analyzer_result_file }}
       run: |
         python "${ACTION_PATH}/scripts/analyzer.py"
+
 
     # ---------------------------------------------------------------------
     # 1i. Upload artifacts.
@@ -147,12 +169,29 @@ runs:
         path: artifacts/repomix_result.xml
         if-no-files-found: ignore
 
-    - name: Upload raw analyzer result artifact
+    - name: Upload analyzer result (markdown) artifact
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: analyzer-result
-        path: artifacts/analyzer_result.json
+        path: artifacts/analyzer_result.md
+        if-no-files-found: ignore
+
+    - name: Upload raw pprof profile artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: raw-profile
+        path: artifacts/raw_profile.pb.gz
+        if-no-files-found: ignore
+
+
+    - name: Upload constructed prompt artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: prompt
+        path: artifacts/prompt.txt
         if-no-files-found: ignore
 
     # ---------------------------------------------------------------------

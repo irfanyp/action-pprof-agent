@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Keep GitHub Actions used in action.yml up to date
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Keep Python dependencies in scripts/requirements.txt up to date
+  - package-ecosystem: "pip"
+    directory: "/scripts"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(python-deps)"
+    labels:
+      - "dependencies"
+      - "python"

@@ -43,6 +43,11 @@ jobs:
           ai_model: gamma4
           reference: ${{ inputs.reference }}
           tags: ${{ inputs.tags }}
+          # Optional: supply a raw pprof profile file directly (testing mode).
+          # When set, the SERVICE_URL trigger/poll/submit steps are skipped and
+          # the profile is converted to markdown via pprof-to-md.
+          # analyzer_result_file: ./test-data/pprof.pprof-dummy-go.samples.cpu.001.pb.gz
+
 
       - name: Show results
         run: |
