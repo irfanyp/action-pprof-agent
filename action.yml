@@ -99,7 +99,11 @@ runs:
     - name: Setup Node
       uses: actions/setup-node@v7
       with:
-        node-version: '20'
+        # Node 22 is required by repomix (>=22.0.0), pprof-to-md (>=22.6.0),
+        # and their transitive deps (e.g. commander@15 >=22.12.0,
+        # @secretlint/* >=22.0.0). Bump in sync whenever Dependabot updates
+        # these packages to a new major with a higher engines.node floor.
+        node-version: '22'
 
     - name: Install Node tooling (repomix, pprof-to-md)
       shell: bash
