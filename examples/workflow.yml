@@ -48,6 +48,10 @@ jobs:
           # the profile is converted to markdown via pprof-to-md.
           # analyzer_result_file: ./test-data/pprof.pprof-dummy-go.samples.cpu.001.pb.gz
 
+          # Optional: override the default analyzer service URL (e.g. for
+          # staging or an alternative analyzer service).
+          # service_url: https://analyzer-staging.internal/api/v1
+
 
       - name: Show results
         run: |

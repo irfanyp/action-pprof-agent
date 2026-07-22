@@ -38,8 +38,10 @@ from openai import OpenAI
 # Configuration
 # ---------------------------------------------------------------------------
 
-# SERVICE_URL is hardcoded in the action (per spec).
-SERVICE_URL = "https://analyzer.internal/api/v1"
+# SERVICE_URL base URL of the pprof analyzer service API.
+# Configurable via the `service_url` action input (passed through as the
+# SERVICE_URL env var). Defaults to the internal production endpoint.
+SERVICE_URL = os.environ.get("SERVICE_URL", "https://analyzer.internal/api/v1").rstrip("/")
 
 # Base URL of the GitHub instance running the workflow.
 # On public GitHub this is "https://github.com"; on GitHub Enterprise Server
@@ -60,6 +62,23 @@ ARTIFACTS_DIR = Path("artifacts")
 
 # Directory for temporary repomix output.
 REPOMIX_OUTPUT_DIR = Path("repomix-output")
+
+# Step descriptions for the GitHub Actions step summary table.
+STEP_DESCRIPTIONS: dict[str, str] = {
+    "1a": "Trigger analyzer",
+    "1b": "Poll analyzer result / convert pprof",
+    "1c": "Prepare git checkout",
+    "1d": "Run repomix",
+    "1e": "Construct prompt",
+    "1f": "Feed prompt to LLM",
+    "1g": "Extract git patch",
+    "1h": "Apply git patch",
+    "1j": "Create branch, commit, push, open PR",
+    "1k": "Flag execution as submitted",
+}
+
+# Tracks the status of each step: "ok", "error", or absent (not run yet).
+STEP_RESULTS: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +120,50 @@ def _set_output(name: str, value: str) -> None:
     if output_file:
         with open(output_file, "a", encoding="utf-8") as fh:
             fh.write(f"{name}={value}\n")
+
+
+def _gh_annotation(level: str, message: str, step: str = "") -> None:
+    """Emit a GitHub Actions workflow command annotation.
+
+    ``level`` must be one of ``"error"``, ``"warning"``, or ``"notice"``.
+    The annotation appears in the run summary, the step log, and (for PR
+    checks) the PR annotations view.
+
+    ``step`` is an optional step label (e.g. ``"1h"``) prepended to the
+    message for easy identification.
+    """
+    prefix = f"[{step}] " if step else ""
+    # GitHub requires %, CR, and LF to be percent-encoded in workflow commands.
+    safe_msg = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::{level}::{prefix}{safe_msg}")
+
+
+def _record_step(step: str, status: str) -> None:
+    """Record the status of a step for the step summary table."""
+    STEP_RESULTS[step] = status
+
+
+def _write_step_summary(run_id: str) -> None:
+    """Write a markdown summary table to the GitHub Actions run summary.
+
+    Writes to ``$GITHUB_STEP_SUMMARY`` if set (i.e. when running inside a
+    GitHub Actions runner). Silently does nothing when the variable is absent
+    (e.g. when running locally).
+    """
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_file:
+        return
+    lines = [
+        f"## pprof-analyzer — Run `{run_id}`",
+        "",
+        "| Step | Description | Status |",
+        "|------|-------------|--------|",
+    ]
+    for step, desc in STEP_DESCRIPTIONS.items():
+        status = STEP_RESULTS.get(step, "—")
+        icon = {"ok": "✅", "error": "❌"}.get(status, "⏭️")
+        lines.append(f"| {step} | {desc} | {icon} {status} |")
+    Path(summary_file).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _node_bin(name: str) -> str:
@@ -279,7 +342,9 @@ def prepare_git_checkout(tags: str) -> git.Repo:
     print(f"[1c] Current checkout: {current} (requested: {tags})")
     if current != tags:
         # checkout already happened in the composite action; warn if mismatched.
-        print(f"[1c] WARNING: checked-out ref '{current}' differs from requested '{tags}'")
+        msg = f"Checked-out ref '{current}' differs from requested '{tags}'"
+        _gh_annotation("warning", msg, "1c")
+        print(f"[1c] WARNING: {msg}")
     return repo
 
 
@@ -552,8 +617,12 @@ def main() -> int:
             _set_output("run_id", run_id)
         except Exception as exc:  # noqa: BLE001
             # 1a is outside the 1b-1j error-flag window; just fail.
+            _gh_annotation("error", str(exc), "1a")
+            _record_step("1a", "error")
+            _write_step_summary(run_id or "unknown")
             print(f"ERROR during step 1a: {exc}", file=sys.stderr)
             return 1
+    _record_step("1a", "ok")
 
     # --- Steps 1b-1j (wrapped for error flagging) ---------------------------
     try:
@@ -570,45 +639,57 @@ def main() -> int:
         # exists at the expected path (consistent with all other steps).
         analyzer_result = convert_pprof_to_markdown(pprof_path)
         _write_artifact("analyzer_result.md", analyzer_result)
-
+        _record_step("1b", "ok")
 
         # 1c — prepare git checkout
 
         repo = prepare_git_checkout(tags)
-
+        _record_step("1c", "ok")
 
         # 1d — run repomix
         repomix = run_repomix()
         _write_artifact("repomix_result.xml", repomix)
+        _record_step("1d", "ok")
 
         # 1e — construct prompt
         prompt = construct_prompt(prompt_template, reference, analyzer_result, repomix)
         _write_artifact("prompt.txt", prompt)
         _set_output("prompt", prompt)
+        _record_step("1e", "ok")
 
         # 1f — feed to LLM
         llm_result = call_llm(prompt)
         _write_artifact("llm_result.txt", llm_result)
+        _record_step("1f", "ok")
 
         # 1g — extract patch
         summary, patch = extract_patch(llm_result)
         _write_artifact("patch.diff", patch + "\n")
+        _record_step("1g", "ok")
 
         # 1h — apply patch
         apply_patch(repo, patch)
+        _record_step("1h", "ok")
 
         # 1j — create PR
         pr_url, pr_number = create_pull_request(repo, run_id, summary)
         _set_output("pr_url", pr_url)
         _set_output("pr_number", pr_number)
+        _record_step("1j", "ok")
+        _gh_annotation("notice", f"PR created: {pr_url} (#{pr_number})", "1j")
 
     except AnalyzerError as exc:
+        _gh_annotation("error", exc.message, exc.step)
+        _record_step(exc.step, "error")
+        _write_step_summary(run_id or "unknown")
         print(f"ERROR during step {exc.step}: {exc.message}", file=sys.stderr)
         # 2a — flag error (skipped in file mode; no SERVICE_URL run registered)
         if not file_mode:
             flag_error(run_id, exc.step, exc.message)
         return 1
     except Exception as exc:  # noqa: BLE001
+        _gh_annotation("error", str(exc), "unknown")
+        _write_step_summary(run_id or "unknown")
         print(f"ERROR during steps 1b-1j: {exc}", file=sys.stderr)
         if not file_mode:
             flag_error(run_id, "unknown", str(exc))
@@ -620,11 +701,14 @@ def main() -> int:
     else:
         try:
             flag_submitted(run_id, pr_url, pr_number)
+            _record_step("1k", "ok")
         except Exception as exc:  # noqa: BLE001
             # PR was created; failure to flag is non-fatal but should be visible.
+            _gh_annotation("warning", f"Failed to flag run {run_id} as submitted: {exc}", "1k")
+            _record_step("1k", "error")
             print(f"WARNING: failed to flag run {run_id} as submitted: {exc}", file=sys.stderr)
 
-
+    _write_step_summary(run_id)
     print("pprof-analyzer completed successfully.")
     return 0
 
