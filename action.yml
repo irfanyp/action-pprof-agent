@@ -66,9 +66,6 @@ outputs:
   pr_number:
     description: 'Number of the created Pull Request (empty if none was created).'
     value: ${{ steps.analyzer.outputs.pr_number }}
-  prompt:
-    description: 'The fully-constructed prompt that was sent to the LLM (empty if not constructed).'
-    value: ${{ steps.analyzer.outputs.prompt }}
 
 runs:
   using: 'composite'
