@@ -44,6 +44,15 @@ inputs:
       testing purposes. When unset, the normal SERVICE_URL flow is used.
     required: false
     default: ''
+  service_url:
+    description: |-
+      Base URL of the pprof analyzer service API.
+      Used for triggering runs, polling results, and flagging status
+      (steps 1a, 1b, 1k, and 2a).
+      Override this to point to a staging or alternative analyzer service
+      (e.g. `https://analyzer-staging.internal/api/v1`).
+    required: false
+    default: 'https://analyzer.internal/api/v1'
 
 
 
@@ -145,6 +154,7 @@ runs:
         GITHUB_SERVER_URL: ${{ github.server_url }}
         ACTION_PATH: ${{ github.action_path }}
         ANALYZER_RESULT_FILE: ${{ inputs.analyzer_result_file }}
+        SERVICE_URL: ${{ inputs.service_url }}
       run: |
         python "${ACTION_PATH}/scripts/analyzer.py"
 
