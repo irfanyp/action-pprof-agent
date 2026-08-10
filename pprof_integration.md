@@ -10,20 +10,28 @@ This doc is written so you can hand it directly to a coding agent (Claude Code, 
 
 1. Run `find . -name "go.mod"` to locate module root(s) — monorepos may have several services.
 2. Inspect `go.mod` `require` block for framework signatures:
-   | Import path | Framework |
-   |---|---|
-   | `github.com/gorilla/mux` | gorilla/mux |
-   | `github.com/go-chi/chi` (v4/v5) | chi |
-   | `github.com/julienschmidt/httprouter` | httprouter |
-   | `github.com/labstack/echo` (v3/v4) | echo |
-   | `github.com/gin-gonic/gin` | gin |
-   | `github.com/gofiber/fiber` (v2/v3) | fiber |
-   | `github.com/juju/httprequest` | httprequest |
-   | `github.com/emicklei/go-restful` | go-restful |
-   | *(none of the above)* | plain `net/http` |
+   | Import path | Framework | Category |
+   |---|---|---|
+   | `github.com/gorilla/mux` | gorilla/mux | HTTP router |
+   | `github.com/go-chi/chi` (v4/v5) | chi | HTTP router |
+   | `github.com/julienschmidt/httprouter` | httprouter | HTTP router |
+   | `github.com/labstack/echo` (v3/v4) | echo | HTTP router |
+   | `github.com/gin-gonic/gin` | gin | HTTP router |
+   | `github.com/gofiber/fiber` (v2/v3) | fiber | HTTP router |
+   | `github.com/juju/httprequest` | httprequest | HTTP router (thin wrapper over net/http) |
+   | `github.com/emicklei/go-restful` | go-restful | HTTP router |
+   | `github.com/kataras/iris` | iris | HTTP router |
+   | `github.com/gobuffalo/buffalo` | buffalo | HTTP router (wraps gorilla/mux internally) |
+   | `github.com/go-kratos/kratos` | kratos | HTTP+gRPC framework — its HTTP transport wraps its own mux; treat like an HTTP router for pprof purposes |
+   | `github.com/astaxie/beego` / `github.com/beego/beego` | beego | HTTP router **with caveat** — see 0.2 below |
+   | `sigs.k8s.io/controller-runtime` | controller-runtime | **Manager-owned runtime**, no app-level HTTP router — see 0.2 below |
+   | `github.com/zeromicro/go-zero` | go-zero | Framework with a **built-in DevServer** ops port — see 0.2 below |
+   | `gofr.dev` | GoFr | Framework with **built-in pprof** on its metrics port — see 0.2 below |
+   | `google.golang.org/grpc` (and no HTTP router import above) | plain gRPC service | **No HTTP router at all** — see 0.2 below |
+   | *(none of the above)* | plain `net/http` | HTTP router |
 3. Grep for the actual listener call to find the real entrypoint — don't just trust `main.go`:
    ```
-   grep -rn "ListenAndServe\|\.Run(\|Serve(" --include="*.go" .
+   grep -rn "ListenAndServe\|\.Run(\|Serve(\|mgr.Start\|grpc.NewServer" --include="*.go" .
    ```
 4. Note whether the app uses `http.DefaultServeMux` implicitly (calls `http.Handle`/`http.HandleFunc` directly) — this matters because `net/http/pprof`'s side-effecting import (`_ "net/http/pprof"`) **also registers itself on `http.DefaultServeMux`**, which can silently double-expose pprof on the app's main port if the app also serves off DefaultServeMux. Always give pprof its own `*http.ServeMux` and its own `*http.Server` to avoid this collision.
 
@@ -42,6 +50,42 @@ Classify what you find into one of three states, then jump to the matching scena
 | **No pprof present** | grep above returns nothing | Phases 1–6 (fresh install, as written above) |
 | **Already integrated, properly isolated** | pprof is registered on its *own* `http.ServeMux`/`http.Server` bound to a distinct port (any port), separate from the app's main router | **Scenario A** (below) — just relocate the port |
 | **Already integrated, improperly exposed** | pprof handlers are registered directly on the app's main router/mux (e.g. `router.PathPrefix("/debug/pprof").Handler(...)`, `r.GET("/debug/pprof/*", ...)`, `app.Use(fiberpprof.New())` on the main `app`, or the blank import combined with the app itself serving off `http.DefaultServeMux`) — meaning pprof is reachable on the **same port** as production traffic | **Scenario B** (below) — fix the isolation *and* relocate the port |
+
+### 0.2 — Frameworks That Don't Fit the "Router + ListenAndServe" Model
+
+A handful of frameworks either ship their own native pprof toggle, or have no HTTP router at all. Detecting these up front avoids bolting on a redundant/wrong-shaped fix. **When one of these is detected, prefer its native mechanism over the generic Phase 2 template** — it's more idiomatic and avoids fighting the framework's own lifecycle/shutdown handling.
+
+- **controller-runtime (Kubernetes operators/controllers).** Since controller-runtime `v0.15.0`, the `Manager` has a built-in `Options.PprofBindAddress` field — no manual `net/http/pprof` import or custom server needed at all. Just set it in the existing `ctrl.Options{}` struct passed to `ctrl.NewManager(...)`:
+  ```go
+  mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+      Scheme:                 scheme,
+      Metrics:                server.Options{BindAddress: ":8080"},
+      HealthProbeBindAddress: ":8081",
+      PprofBindAddress:       ":9987", // was likely unset, or on 6060/8082
+      // ... rest of existing options unchanged
+  })
+  ```
+  Check for port collisions against the manager's *other* internal servers too — metrics (commonly `:8080` or `:8443`), health probes (commonly `:8081`), and the webhook server (commonly `:9443`) — not just the app's main traffic port. If the repo is on a controller-runtime version older than v0.15.0, there's no built-in field; fall back to the generic Phase 2 pattern, added as a separate `Runnable` registered via `mgr.Add(...)` so it shares the manager's shutdown lifecycle instead of a bare goroutine.
+
+- **go-zero.** Has a built-in `DevServer` ops block (`service.ServiceConf.DevServer` in `rest.RestConf`/`zrpc.RpcServerConf`) that already centralizes health and metrics on one dedicated port, separate from the main service port. Check the installed go-zero version's `devserver` package for whether pprof is bundled into that same block (this has evolved across versions) — if so, just point `DevServer.Port` at `9987` rather than hand-rolling a second server; if not, add the generic Phase 2 server alongside the existing `DevServer` port (pick a different port than DevServer to avoid a collision).
+
+- **GoFr.** Ships pprof enabled by default, served on its `METRICS_PORT` config value (defaults to `2121`). Just set `METRICS_PORT=9987` in the app's config/env rather than adding any code — check for a collision with GoFr's own metrics usage of that same port first, since GoFr multiplexes pprof and metrics onto it together.
+
+- **beego.** Beego re-implements its own `ServeHTTP`, so the plain blank-import trick (`_ "net/http/pprof"`) does not automatically attach to beego's router the way it does for plain `net/http`. Beego instead exposes profiling through its admin/toolbox module — check `web.conf`/`app.conf` for `EnableAdmin`, `AdminHttpAddr`, and `AdminHttpPort` (or the equivalent `web.BConfig.Listen` struct in code). Point `AdminHttpPort` at `9987` if enabling that module is acceptable; otherwise fall back to a fully standalone Phase 2 server (bound to its own port, with its own `http.ServeMux`) since beego's main router won't pick up `DefaultServeMux` registrations.
+
+- **Plain gRPC services (grpc-go), with or without grpc-gateway.** gRPC servers don't run an HTTP router at all in the traditional sense — `grpc.NewServer()` + `lis.Accept()` speaks the gRPC wire protocol directly, so there's no `DefaultServeMux` collision risk to worry about. The generic Phase 2 template applies as-is: start the standalone pprof `http.Server` in a goroutine right next to wherever `grpcServer.Serve(lis)` is called in `main()`. If the repo also runs a grpc-gateway HTTP reverse proxy, treat *that* proxy's mux as the "main router" for collision-checking purposes (Phase 0.1 still applies to it).
+
+- **Non-serving Go binaries (cron jobs, queue/Kafka consumers, CLI tools, one-shot batch jobs).** These have no long-running listener to hang pprof off in the traditional sense. If profiling is still wanted, the generic Phase 2 server can be started conditionally (e.g. behind `ENABLE_PPROF`) inside `main()` regardless of the absence of a router — it just runs alongside whatever the binary's actual work loop is, and should be gated so it doesn't linger after a short-lived job exits without the operator asking for it.
+
+### 0.3 — Fallback When the Framework Can't Be Identified
+
+This plan can't enumerate every framework that exists, and a repo might use something not in the table above (a newer or niche router, an in-house wrapper, a framework this plan hasn't caught up to yet). Don't stall or guess wildly — fall back to this safe default procedure instead of skipping the task:
+
+1. **Confirm it's actually a long-running service first.** Re-run the Phase 0 grep for `ListenAndServe`/`.Run(`/`Serve(`/`mgr.Start`/`grpc.NewServer`. If nothing matches at all, treat it as a non-serving binary (last bullet in 0.2) rather than forcing an HTTP-shaped fix onto it.
+2. **If a listener exists but the framework is unrecognized**, inspect what's actually passed as the `Handler` to that listener call (or the object `.Run()`/`.Serve()` is a method on). Whatever it is — a custom in-house router, an unfamiliar third-party package, a struct that merely implements `http.Handler` — **the generic Phase 2 standalone server is always safe to apply regardless of what that handler is**, because it never touches the app's own router at all. This is the reason the standalone-server pattern was chosen as the default template throughout this plan: it doesn't require understanding the app's routing internals to be correct.
+3. **Apply the Phase 2 template as-is**, wire it into `main()` next to the unidentified framework's listener call (same placement rule as every other framework: right before the blocking `Serve`/`Run`/`ListenAndServe` call), and run the full Phase 5 validation checklist to confirm both that pprof works on the new port *and* that it did not attach to the main app's port (this second check matters even more here, precisely because the framework's own `DefaultServeMux` behavior is unknown).
+4. **Report the fallback explicitly.** State plainly in your output that the framework could not be identified against the known table, that the generic isolated-server fallback was used instead of a framework-native integration, and name the specific import paths / listener call that didn't match anything recognized — so a human reviewer knows to double check for a native pprof option this plan doesn't yet know about, and so this plan can be extended later.
+5. **Never silently do nothing.** An unidentified framework is a reason to fall back to the generic template with a flagged report, not a reason to skip the task or ask the person to identify it themselves first — proceed with the safe default and let them override if a better native option turns out to exist.
 
 ---
 
@@ -126,6 +170,8 @@ This block **never changes** across frameworks — it's plain `net/http`, so it 
 
 The only per-framework work is **where** you call `StartPprofServer()` — always in `main()` (or the bootstrap function), never inside a request handler. Below is what to look for and what to add, per framework.
 
+> **Note:** If Phase 0.2 flagged the repo as controller-runtime, go-zero, GoFr, beego, or a router-less gRPC/worker service, use the corresponding approach from 0.2 instead of the templates below — those either have a native pprof option or a genuinely different lifecycle shape. The templates below cover conventional HTTP-router frameworks. **If the framework doesn't match anything in the table at all, skip straight to the Phase 0.3 fallback** — don't force-fit one of the named templates onto an unrecognized router.
+
 ### Plain `net/http` / gorilla/mux / chi / httprouter / go-restful
 These all eventually call something like `http.ListenAndServe(addr, router)`. Add the pprof call just before that line:
 ```go
@@ -183,6 +229,54 @@ func main() {
 	defer StopPprofServer(pprofSrv)
 
 	log.Fatal(app.Listen(":8080"))
+}
+```
+
+### iris
+Same pattern as echo/gin — iris has its own optional pprof middleware that mounts on the same app/port; for a separate port, use the standalone server:
+```go
+func main() {
+	app := iris.New()
+	// ... existing routes ...
+
+	pprofSrv := StartPprofServer()
+	defer StopPprofServer(pprofSrv)
+
+	app.Listen(":8080")
+}
+```
+
+### buffalo
+Buffalo wraps gorilla/mux internally and typically starts via `app.Serve()`. Add the pprof call right before it, same as the gorilla/mux case:
+```go
+func main() {
+	app := app.App()
+	// ... existing routes ...
+
+	pprofSrv := StartPprofServer()
+	defer StopPprofServer(pprofSrv)
+
+	if err := app.Serve(); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+### kratos (go-kratos)
+Kratos apps are usually built with `kratos.New(kratos.Server(httpSrv, grpcSrv), ...)` and started via `app.Run()`. Add the pprof call before `app.Run()`, alongside wherever `http.NewServer(...)`/`grpc.NewServer(...)` are constructed — it doesn't need to touch either transport, since it runs as its own isolated listener:
+```go
+func main() {
+	httpSrv := http.NewServer(http.Address(":8080"))
+	grpcSrv := grpc.NewServer(grpc.Address(":9000"))
+	// ... existing registration ...
+
+	pprofSrv := StartPprofServer()
+	defer StopPprofServer(pprofSrv)
+
+	app := kratos.New(kratos.Server(httpSrv, grpcSrv))
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
@@ -266,7 +360,7 @@ After wiring, verify:
 
 ## Ready-to-Paste Agent Prompt
 
-> Detect which Go HTTP framework this repository uses (net/http, gorilla/mux, chi, httprouter, echo, gin, fiber, httprequest, go-restful, or other) by inspecting `go.mod` and the entrypoint's router/listener setup. Also check whether pprof is already integrated anywhere in the repo, and branch accordingly:
+> Detect which Go framework this repository uses by inspecting `go.mod` and the entrypoint's setup — a conventional HTTP router (net/http, gorilla/mux, chi, httprouter, echo, gin, fiber, iris, buffalo, kratos, httprequest, go-restful), a framework with a native pprof mechanism (controller-runtime's `PprofBindAddress`, go-zero's `DevServer`, GoFr's `METRICS_PORT`, beego's admin/toolbox module), or a router-less service (plain gRPC, a cron/worker/batch binary). Prefer a framework's native pprof mechanism over hand-rolling a server when one exists. **If the framework doesn't match any of these, don't stop or guess wildly** — fall back to a standalone, isolated `net/http/pprof` server wired in next to whatever listener call you did find, since that pattern is safe regardless of what the app's own router is, and clearly flag in your report that this was a fallback due to an unrecognized framework (name the unmatched import paths/listener call so it can be reviewed later). Also check whether pprof is already integrated anywhere in the repo, and branch accordingly:
 > - **If no pprof integration exists:** add a new one from scratch, isolated on its own port.
 > - **If pprof is already integrated on its own isolated server/port, just not the priority port:** make the minimal change needed to move it to the priority port (9987, falling back to 6060 on collision) — don't restructure anything else that's already working.
 > - **If pprof is already integrated but reachable on the same port/router as production traffic** (mounted on the main router, or the app serving off `http.DefaultServeMux` alongside a blank pprof import): remove the main-router exposure first, then stand up an isolated server on the priority port. Explicitly flag this as a security fix in your report, since it was previously leaking profiling data on a production-facing port.
@@ -277,4 +371,4 @@ After wiring, verify:
 > - Uses its own `*http.ServeMux`/`*http.Server` so it never collides with the app's existing router or `http.DefaultServeMux`.
 > - Starts as a goroutine from `main()` right before the app's main listener starts, and shuts down gracefully alongside the app's existing shutdown path (or via `defer` if none exists).
 > - Is optionally gated behind an `ENABLE_PPROF` env var if the app runs in production.
-> Report back: which framework was detected, which scenario applied (fresh install / port relocation / security fix), what file(s) were changed/added, the final port/env vars, and the curl commands to verify `/debug/pprof/` is reachable on the new port but not on the main app port.
+> Report back: which framework was detected (or that it was unidentified and the fallback was used), which scenario applied (fresh install / port relocation / security fix), what file(s) were changed/added, the final port/env vars, and the curl commands to verify `/debug/pprof/` is reachable on the new port but not on the main app port.
