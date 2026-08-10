@@ -4,7 +4,7 @@
   "private": true,
   "description": "Pinned npm tooling (repomix, pprof-to-md) for the pprof-analyzer GitHub Action. Versions are managed by Dependabot.",
   "dependencies": {
-    "repomix": "^1.17.0",
+    "repomix": "^1.18.0",
     "pprof-to-md": "^0.2.0"
   }
 }
