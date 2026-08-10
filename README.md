@@ -123,6 +123,21 @@ context (exposed to the script as `GITHUB_SERVER_URL`). No extra input is requir
 
 On public `github.com` the behavior is unchanged.
 
+## Prerequisites for the target service
+
+The Go service being analyzed must expose a **pprof-enabled endpoint** so the analyzer can collect CPU, memory, and goroutine profiles. Concretely:
+
+- The service must import `net/http/pprof` and serve the profiling handlers (e.g. `/debug/pprof/`) on a **dedicated, isolated port** (default `9987`), not on the main application port.
+- The pprof server should bind to `127.0.0.1` by default and be reachable from the analyzer service.
+- If the service does not yet expose pprof — or exposes it on the main app port — follow the integration guide below to wire it up correctly before running this action.
+
+> 📖 See [`pprof_integration.md`](pprof_integration.md) for a complete, framework-aware integration guide. It can be handed directly to a coding agent (e.g. Claude Code) or followed manually phase-by-phase. It covers:
+> - **Framework detection** — auto-detects net/http, gorilla/mux, chi, httprouter, echo, gin, fiber, httprequest, go-restful.
+> - **Fresh install** — adds an isolated `net/http/pprof` server on port `9987` (configurable via `PPROF_PORT`).
+> - **Port relocation** — moves an already-isolated pprof server to the priority port with a minimal diff.
+> - **Security fix** — removes pprof exposure from the main app router/port and re-isolates it.
+> - **Validation checklist** and a **ready-to-paste agent prompt**.
+
 ## Pre-requisites
 
 The composite action installs everything it needs:
@@ -154,5 +169,6 @@ pprof-analyzer/
 │       └── prompt_template.txt       # LLM prompt template
 ├── examples/
 │   └── workflow.yml                 # Example caller workflow
+├── pprof_integration.md             # Guide for integrating net/http/pprof into target Go services
 └── README.md
 ```
