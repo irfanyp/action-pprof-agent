@@ -30,6 +30,7 @@ See [`examples/workflow.yml`](examples/workflow.yml) for a complete `workflow_di
 | `reference` | yes | — | User reference option: `low`, `med`, or `high`. Controls analysis depth/strictness. Expected to come from a `workflow_dispatch` input. |
 | `tags` | yes | — | Repository checkout branch/tag (git ref) to analyze. Expected to come from a `workflow_dispatch` input. |
 | `analyzer_result_file` | no | `""` | Optional path to a raw pprof profile file (e.g. `pprof.pprof-dummy-go.samples.cpu.001.pb.gz`). When set, the action skips the `SERVICE_URL` trigger/poll/submit steps (1a, 1b, 1k) and loads the raw pprof profile from this file instead. The profile is then converted to markdown via `pprof-to-md`. Intended for testing. |
+| `use_test` | no | `false` | If `true`, runs `go test -cpuprofile=cpu.prof ./...` to generate a CPU profile before analysis. Only applies when both `service_url` and `analyzer_result_file` are at their default values. Useful for local testing without an external analyzer service. |
 
 
 
@@ -64,7 +65,9 @@ The action runs a Python orchestration script (`scripts/analyzer.py`) that perfo
 
 If any step **1b–1j** fails, the script calls `POST {SERVICE_URL}/runs/{run_id}/error` with the failing step and error message (spec step 2a), then exits with a non-zero code so the workflow fails.
 
-## Testing / local mode (file-based raw pprof profile)
+## Testing / local mode
+
+### Option 1: File-based raw pprof profile
 
 For testing, you can bypass the `SERVICE_URL` analyzer service and supply a raw pprof profile directly. Set the `analyzer_result_file` input to the path of a raw pprof profile file (e.g. `*.pb.gz`):
 
@@ -90,7 +93,32 @@ When `analyzer_result_file` is set:
 - A local `run_id` of the form `local-<timestamp>` is generated so branch naming and outputs still work.
 - All remaining steps (1c–1j) run as normal.
 
-When `analyzer_result_file` is unset (the default), the normal `SERVICE_URL` flow is used unchanged.
+### Option 2: Generated CPU profile via `go test`
+
+Alternatively, you can generate a CPU profile on-the-fly by running `go test` with CPU profiling enabled. Set the `use_test` input to `true`:
+
+```yaml
+- name: pprof analyzer
+  id: pprof
+  uses: <this-module-repo>@<this-module-version>
+  with:
+    token: ${{ secrets.GITHUB_TOKEN }}
+    ai_endpoint: ${{ secrets.AI_ENDPOINT }}
+    ai_key: ${{ secrets.AI_KEY }}
+    ai_model: gamma4
+    reference: ${{ inputs.reference }}
+    tags: ${{ inputs.tags }}
+    use_test: true
+```
+
+When `use_test` is `true` (and both `service_url` and `analyzer_result_file` are at their default values):
+
+- The action runs `go test -cpuprofile=cpu.prof ./...` to generate a CPU profile from your test suite.
+- The generated `cpu.prof` is automatically used as the `analyzer_result_file`.
+- All remaining steps (1b–1j) proceed as with Option 1 (file-based profiling).
+- This is useful for local testing without needing an external analyzer service.
+
+When `use_test` is unset or `false` (the default), the normal `SERVICE_URL` flow is used unchanged.
 
 
 

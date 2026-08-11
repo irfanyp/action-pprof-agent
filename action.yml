@@ -53,6 +53,14 @@ inputs:
       (e.g. `https://analyzer-staging.internal/api/v1`).
     required: false
     default: 'https://analyzer.internal/api/v1'
+  use_test:
+    description: |-
+      If true, runs `go test -cpuprofile=cpu.prof ./...` to generate a CPU profile
+      and uses it as the analyzer_result_file. Only applies when both service_url
+      and analyzer_result_file are at their default values (i.e., not explicitly set).
+      Useful for local testing without the need for an external analyzer service.
+    required: false
+    default: 'false'
 
 
 
@@ -116,6 +124,28 @@ runs:
       working-directory: ${{ github.action_path }}
       run: npm ci --omit=dev
 
+    # -----------------------------------------------------------------------
+    # Optional: Generate CPU profile via go test and set as analyzer_result_file
+    #
+    # Runs only if use_test is true AND both service_url and analyzer_result_file
+    # are at their default values (i.e., not explicitly overridden).
+    # -----------------------------------------------------------------------
+    - name: Generate CPU profile via go test
+      if: |
+        inputs.use_test == 'true' &&
+        inputs.service_url == 'https://analyzer.internal/api/v1' &&
+        inputs.analyzer_result_file == ''
+      shell: bash
+      run: |
+        echo "Generating CPU profile via go test..."
+        go test -cpuprofile=cpu.prof ./...
+        if [ ! -f cpu.prof ]; then
+          echo "Error: cpu.prof not generated"
+          exit 1
+        fi
+        CPU_PROF_PATH="$(pwd)/cpu.prof"
+        echo "CPU profile generated: $CPU_PROF_PATH"
+        echo "ANALYZER_RESULT_FILE=$CPU_PROF_PATH" >> $GITHUB_ENV
 
     # ---------------------------------------------------------------------
     # Pre-requisite: git (already available on GitHub runners, but ensure config)
