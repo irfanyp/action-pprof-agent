@@ -66,7 +66,9 @@ If any step **1b–1j** fails, the script calls `POST {SERVICE_URL}/runs/{run_id
 
 ## Testing / local mode (file-based raw pprof profile)
 
-For testing, you can bypass the `SERVICE_URL` analyzer service and supply a raw pprof profile directly. Set the `analyzer_result_file` input to the path of a raw pprof profile file (e.g. `*.pb.gz`):
+For testing, you can bypass the `SERVICE_URL` analyzer service and supply a raw pprof profile directly. Set the `analyzer_result_file` input to the path of a raw pprof profile file (e.g. `*.pb.gz`).
+
+### Using a pre-generated profile file
 
 ```yaml
 - name: pprof analyzer
@@ -81,6 +83,29 @@ For testing, you can bypass the `SERVICE_URL` analyzer service and supply a raw 
     tags: ${{ inputs.tags }}
     analyzer_result_file: ./test-data/pprof.pprof-dummy-go.samples.cpu.001.pb.gz
 ```
+
+### Generating a profile from go test
+
+Alternatively, generate a CPU profile on-the-fly by running `go test` with CPU profiling before the action:
+
+```yaml
+- name: Generate CPU profile
+  run: go test -cpuprofile=cpu.prof ./...
+
+- name: pprof analyzer
+  id: pprof
+  uses: <this-module-repo>@<this-module-version>
+  with:
+    token: ${{ secrets.GITHUB_TOKEN }}
+    ai_endpoint: ${{ secrets.AI_ENDPOINT }}
+    ai_key: ${{ secrets.AI_KEY }}
+    ai_model: gamma4
+    reference: ${{ inputs.reference }}
+    tags: ${{ inputs.tags }}
+    analyzer_result_file: ./cpu.prof
+```
+
+### Behavior when analyzer_result_file is set
 
 When `analyzer_result_file` is set:
 
