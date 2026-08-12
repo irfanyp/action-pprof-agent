@@ -46,6 +46,7 @@ class Config:
     PPROF_TO_MD_TIMEOUT_SECONDS = 60
     REPOMIX_TIMEOUT_SECONDS = 120
     GIT_OPERATIONS_TIMEOUT_SECONDS = 120
+    GH_CLI_TIMEOUT_SECONDS = 180
 
     ARTIFACTS_DIR = Path("artifacts")
     REPOMIX_OUTPUT_DIR = Path("repomix-output")
@@ -67,6 +68,15 @@ class Config:
         "1j": "Create branch, commit, push, open PR",
         "1k": "Flag execution as submitted",
     }
+
+
+class AnalyzerError(Exception):
+    """Raised when a step in the 1b-1j flow fails. Carries the step label."""
+
+    def __init__(self, step: str, message: str):
+        self.step = step
+        self.message = message
+        super().__init__(f"[{step}] {message}")
 
 
 class EnvConfig:
@@ -98,9 +108,12 @@ class EnvConfig:
             raise AnalyzerError("init", f"Required env var missing: {name}")
         return value
 
-    def _get_optional(self, name: str, default: str) -> str:
-        """Get optional env var with default."""
-        return os.environ.get(name, default)
+    def _get_optional(self, name: str, default: str | None = None) -> str | None:
+        """Get optional env var with default (stripped of whitespace)."""
+        value = os.environ.get(name, default)
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     def _get_enum(self, name: str, allowed: set) -> str:
         """Get enum env var, validate against allowed values."""
@@ -129,17 +142,13 @@ STEP_RESULTS: dict[str, str] = {}
 # Helpers
 # ---------------------------------------------------------------------------
 
-class AnalyzerError(Exception):
-    """Raised when a step in the 1b-1j flow fails. Carries the step label."""
-
-    def __init__(self, step: str, message: str):
-        self.step = step
-        self.message = message
-        super().__init__(f"[{step}] {message}")
-
-
 def _service_request(
-    method: str, endpoint: str, step: str, payload: dict = None, ai_key: str = None
+    method: str,
+    endpoint: str,
+    step: str,
+    service_url: str,
+    ai_key: str,
+    payload: dict | None = None,
 ) -> dict:
     """Make authenticated request to SERVICE_URL, raising AnalyzerError on failure.
 
@@ -147,8 +156,9 @@ def _service_request(
         method: HTTP method ("GET", "POST")
         endpoint: API endpoint path (e.g. "/runs", "/runs/{id}/submit")
         step: Step label for error reporting (e.g. "1a", "1b")
+        service_url: Base URL of the analyzer service API
+        ai_key: API key used as Bearer token
         payload: Optional JSON payload for POST requests
-        ai_key: API key for Bearer token (defaults to AI_KEY env var)
 
     Returns:
         Parsed JSON response dict
@@ -156,14 +166,6 @@ def _service_request(
     Raises:
         AnalyzerError: On network error, timeout, or HTTP error
     """
-    if ai_key is None:
-        ai_key = os.environ.get("AI_KEY", "")
-    if not ai_key:
-        raise AnalyzerError(step, "AI_KEY not set")
-
-    service_url = os.environ.get("SERVICE_URL", "https://analyzer.internal/api/v1").rstrip(
-        "/"
-    )
     url = f"{service_url}{endpoint}"
     headers = {
         "Authorization": f"Bearer {ai_key}",
@@ -216,14 +218,6 @@ def _run_command(
         raise AnalyzerError(step, f"{prefix_msg}Command timeout: {' '.join(cmd[:2])} took >{timeout}s") from exc
     except Exception as exc:
         raise AnalyzerError(step, f"{prefix_msg}Command failed: {exc}") from exc
-
-
-def _auth_headers() -> dict:
-    """Authorization headers for SERVICE_URL (bearer token = AI_KEY)."""
-    return {
-        "Authorization": f"Bearer {os.environ['AI_KEY']}",
-        "Content-Type": "application/json",
-    }
 
 
 def _ensure_artifacts_dir() -> None:
@@ -290,7 +284,7 @@ def _write_step_summary(run_id: str) -> None:
     Path(summary_file).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _node_bin(name: str) -> str:
+def _node_bin(name: str, action_path: Path) -> str:
     """Resolve an npm-installed CLI binary from the action's local node_modules.
 
     The composite action runs ``npm ci`` in ``${ACTION_PATH}`` (see action.yml),
@@ -303,11 +297,7 @@ def _node_bin(name: str) -> str:
     re-resolve at runtime and guarantees the version pinned in
     ``package-lock.json`` is the one that runs.
     """
-    action_path = os.environ.get("ACTION_PATH", "")
-    if not action_path:
-        # Fall back to a bare command (assumes it is on PATH).
-        return name
-    candidate = Path(action_path) / "node_modules" / ".bin" / name
+    candidate = action_path / "node_modules" / ".bin" / name
     return str(candidate)
 
 
@@ -331,7 +321,7 @@ def _decode_pprof_result(result: str) -> Path:
     return out_path
 
 
-def convert_pprof_to_markdown(pprof_path: Path) -> str:
+def convert_pprof_to_markdown(pprof_path: Path, action_path: Path) -> str:
     """Convert a raw pprof profile to LLM-friendly markdown via ``pprof-to-md``.
 
     Uses the ``detailed`` format (full call tree with function details) and
@@ -342,7 +332,7 @@ def convert_pprof_to_markdown(pprof_path: Path) -> str:
     _ensure_artifacts_dir()
     out_file = Config.ARTIFACTS_DIR / "analyzer_result.md"
     cmd = [
-        _node_bin("pprof-to-md"),
+        _node_bin("pprof-to-md", action_path),
         "--format", "detailed",
         str(pprof_path),
         "-o", str(out_file),
@@ -371,7 +361,7 @@ def trigger_analyzer(reference: str, tags: str, repository: str, config: EnvConf
         "tags": tags,
         "repository": repository,
     }
-    data = _service_request("POST", "/runs", "1a", payload, config.ai_key)
+    data = _service_request("POST", "/runs", "1a", config.service_url, config.ai_key, payload)
     run_id = data.get("run_id")
     if not run_id:
         raise AnalyzerError("1a", f"No run_id in trigger response: {data}")
@@ -394,7 +384,7 @@ def poll_analyzer_result(run_id: str, config: EnvConfig) -> Path:
     last_status = None
 
     while time.time() < deadline:
-        data = _service_request("GET", f"/runs/{run_id}", "1b", ai_key=config.ai_key)
+        data = _service_request("GET", f"/runs/{run_id}", "1b", config.service_url, config.ai_key)
         status = data.get("status", "unknown")
         if status != last_status:
             print(f"[1b] Polling run {run_id}: status={status}")
@@ -464,7 +454,7 @@ def prepare_git_checkout(tags: str) -> git.Repo:
 # Step 1d — Run repomix
 # ---------------------------------------------------------------------------
 
-def run_repomix() -> str:
+def run_repomix(action_path: Path) -> str:
     """Run `repomix` to produce an XML representation of the repo.
 
     Uses the locally-installed (pinned) binary from ``${ACTION_PATH}/node_modules/.bin``
@@ -475,7 +465,7 @@ def run_repomix() -> str:
     out_file = Config.REPOMIX_OUTPUT_DIR / "repomix.xml"
 
     cmd = [
-        _node_bin("repomix"),
+        _node_bin("repomix", action_path),
         "--style", "xml",
         "--output", str(out_file),
     ]
@@ -577,10 +567,10 @@ def apply_patch(repo: git.Repo, patch: str) -> None:
 # Step 1j — Create branch, commit, push, open PR
 # ---------------------------------------------------------------------------
 
-def create_pull_request(repo: git.Repo, run_id: str, summary: str) -> tuple[str, str]:
+def create_pull_request(repo: git.Repo, run_id: str, summary: str, config: EnvConfig) -> tuple[str, str]:
     """Create a branch, commit the applied changes, push, and open a PR via gh."""
     branch_name = f"pprof/fix-{run_id}"
-    base_branch = repo.active_branch.name if not repo.head.is_detached else os.environ.get("TAGS", "main")
+    base_branch = repo.active_branch.name if not repo.head.is_detached else config.tags
 
     # Create and checkout the new branch.
     print(f"[1j] Creating branch {branch_name}")
@@ -598,7 +588,7 @@ def create_pull_request(repo: git.Repo, run_id: str, summary: str) -> tuple[str,
     repo.index.commit(commit_msg)
 
     # Push the branch.
-    token = os.environ["GITHUB_TOKEN"]
+    token = config.token
     repo_url = repo.remote("origin").url
     # Inject token for push auth.
     authed_url = re.sub(r"(https://)([^@]+@)?", rf"\1x-access-token:{token}@", repo_url)
@@ -632,7 +622,7 @@ def create_pull_request(repo: git.Repo, run_id: str, summary: str) -> tuple[str,
             "--body", pr_body,
         ],
         "1j",
-        timeout=Config.GIT_OPERATIONS_TIMEOUT_SECONDS,
+        timeout=Config.GH_CLI_TIMEOUT_SECONDS,
         error_prefix="gh pr create",
     ).strip()
 
@@ -652,7 +642,7 @@ def flag_submitted(run_id: str, pr_url: str, pr_number: str, config: EnvConfig) 
         "pr_url": pr_url,
         "pr_number": pr_number,
     }
-    _service_request("POST", f"/runs/{run_id}/submit", "1k", payload, config.ai_key)
+    _service_request("POST", f"/runs/{run_id}/submit", "1k", config.service_url, config.ai_key, payload)
     print(f"[1k] Run {run_id} flagged as submitted.")
 
 
@@ -667,7 +657,7 @@ def flag_error(run_id: str, step: str, message: str, config: EnvConfig) -> None:
         "error": message,
     }
     try:
-        _service_request("POST", f"/runs/{run_id}/error", "2a", payload, config.ai_key)
+        _service_request("POST", f"/runs/{run_id}/error", "2a", config.service_url, config.ai_key, payload)
         print(f"[2a] Run {run_id} flagged as error (step {step}).")
     except Exception as exc:  # noqa: BLE001
         print(f"[2a] WARNING: failed to flag error for run {run_id}: {exc}", file=sys.stderr)
@@ -733,7 +723,7 @@ def main() -> int:
         # convert_pprof_to_markdown writes directly to artifacts/analyzer_result.md
         # via -o; the explicit _write_artifact below guarantees the artifact
         # exists at the expected path (consistent with all other steps).
-        analyzer_result = convert_pprof_to_markdown(pprof_path)
+        analyzer_result = convert_pprof_to_markdown(pprof_path, config.action_path)
         _write_artifact("analyzer_result.md", analyzer_result)
         _record_step("1b", "ok")
 
@@ -742,7 +732,7 @@ def main() -> int:
         _record_step("1c", "ok")
 
         # 1d — run repomix
-        repomix = run_repomix()
+        repomix = run_repomix(config.action_path)
         _write_artifact("repomix_result.xml", repomix)
         _record_step("1d", "ok")
 
@@ -766,7 +756,7 @@ def main() -> int:
         _record_step("1h", "ok")
 
         # 1j — create PR
-        pr_url, pr_number = create_pull_request(repo, run_id, summary)
+        pr_url, pr_number = create_pull_request(repo, run_id, summary, config)
         _set_output("pr_url", pr_url)
         _set_output("pr_number", pr_number)
         _record_step("1j", "ok")
