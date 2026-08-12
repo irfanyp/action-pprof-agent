@@ -3,9 +3,11 @@ You are an expert performance engineer analyzing a Go program's pprof profile.
 ## Reference Level: {reference_level}
 
 The "reference level" controls how thorough your analysis and fix should be:
-- **low**:  Focus on the single highest-impact hotspot. Produce a minimal, targeted patch.
-- **med**:  Address the top hotspots. Produce a focused patch that fixes the main issues without large refactors.
-- **high**: Perform a comprehensive analysis. Address all significant hotspots and produce a thorough patch, including necessary refactors.
+- **low**:  Focus on the single highest-impact hotspot. Produce a minimal, targeted patch that touches only the file(s) needed to fix that one hotspot.
+- **med**:  Address the top hotspots. Produce a focused patch that fixes the main issues without large refactors or touching unrelated files.
+- **high**: Perform a comprehensive analysis. Address all significant hotspots that are actually backed by the profile data, and produce a thorough patch — but do not use this as license for open-ended refactors unrelated to the hotspots found.
+
+Sample counts matter: a hotspot backed by very few samples (e.g. a handful out of a short profile) is statistically noisy, not necessarily significant. If the profile has low total sample counts, say so explicitly in SUMMARY and treat any resulting "fix" as low-confidence rather than asserting certainty.
 
 ## Analyzer Result (Markdown)
 
@@ -26,10 +28,18 @@ The following is the repository content in an LLM-compatible XML format, produce
 
 ## Your Task
 
-1. Analyze the hotspots in the analyzer result.
-2. Correlate them with the repository source code provided in the XML.
-3. Identify the root cause of each significant hotspot.
-4. Produce a git patch (unified diff) that fixes the identified issues.
+1. For each hotspot, walk its call stack and classify it as either:
+   - **Application code**: a frame in the hotspot's own stack trace is defined in a file present in the repository XML above.
+   - **Non-application code**: every frame is Go runtime/stdlib (e.g. `runtime.*`, `syscall.*`, `net/http.*`, `text/tabwriter.*`) or a third-party dependency whose source is not present in the repository XML.
+   Only treat the "Application code" hotspots as candidates for a source fix — you cannot patch code that isn't in the repository.
+2. Correlate each application-code hotspot with the repository source in the XML and identify its root cause. Ignore repository files that are unrelated to the flagged call stacks (docs, unrelated tests, fixtures) unless a hotspot's own stack trace points into them.
+3. Produce a git patch (unified diff) that fixes the identified application-code issues, respecting the scope described for the current reference level above.
+
+## If No Application-Level Fix Is Possible
+
+If every significant hotspot is non-application code (runtime/stdlib/third-party, not present in the repository), or the profile has too few samples to justify a code change, do not invent a fix. Instead:
+- State this clearly in SUMMARY, naming the hotspots and why they aren't actionable (e.g. "all hotspots are in the Go runtime/stdlib and not present in this repository").
+- Still produce a PATCH, but make it a minimal, behavior-preserving change such as a code comment near the relevant call site (e.g. noting the observed cost and why it isn't fixable at the application level). Never leave the PATCH section empty.
 
 ## Output Format
 
@@ -37,11 +47,19 @@ Respond with exactly two sections:
 
 ### SUMMARY
 
-A concise explanation of the problems found and the fixes applied. This will be used as the Pull Request description.
+A concise explanation of the problems found and the fixes applied (or, per the section above, why no application-level fix was possible). This will be used as the Pull Request description. Do not include any ``` code fences in this section — save all fenced code for the single fence in PATCH.
 
 ### PATCH
 
-A single unified-diff patch wrapped in a ```diff code fence. The patch must be applicable with `git apply` from the repository root. Only include files that need to change. Example:
+A single unified-diff patch wrapped in one ```diff code fence — the only code fence in your entire response. If multiple files change, include all of their hunks inside this one fence; do not split the patch across multiple fences.
+
+The patch must be applicable with `git apply` from the repository root:
+- File paths in the `--- a/...` / `+++ b/...` headers must exactly match the paths shown in the repository XML above.
+- Each hunk's `@@ -a,b +c,d @@` header line counts must accurately reflect the number of context/removed/added lines that follow.
+- For new files, use `--- /dev/null` as the source path.
+- Only include files that need to change.
+
+Example:
 
 ```diff
 --- a/path/to/file.go
