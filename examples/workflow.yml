@@ -29,6 +29,11 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  # Prevent overlapping runs on the same branch/tag from racing on PR creation.
+  group: pprof-analyzer-${{ inputs.tags }}
+  cancel-in-progress: false
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -51,6 +56,11 @@ jobs:
           # Optional: override the default analyzer service URL (e.g. for
           # staging or an alternative analyzer service).
           # service_url: https://analyzer-staging.internal/api/v1
+
+          # Optional: override the PR base branch. When unset, the PR targets
+          # the repository's default branch, regardless of whether `tags` is
+          # a branch or a tag.
+          # base_branch: main
 
 
       - name: Show results
