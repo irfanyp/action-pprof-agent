@@ -480,6 +480,7 @@ def run_repomix(action_path: Path) -> str:
     cmd = [
         _node_bin("repomix", action_path),
         "--style", "xml",
+        "--token-count-tree",  "--output-show-line-numbers", 
         "--output", str(out_file),
     ]
     print(f"[1d] Running: {' '.join(cmd)}")
