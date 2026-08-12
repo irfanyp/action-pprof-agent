@@ -48,6 +48,11 @@ class Config:
     GIT_OPERATIONS_TIMEOUT_SECONDS = 120
     GH_CLI_TIMEOUT_SECONDS = 180
 
+    # Total number of LLM generations attempted for a patch (1 initial +
+    # retries). If the patch fails `git apply --check` or extraction, the
+    # failure is fed back to the LLM for a corrective regeneration.
+    MAX_PATCH_ATTEMPTS = 2
+
     ARTIFACTS_DIR = Path("artifacts")
     REPOMIX_OUTPUT_DIR = Path("repomix-output")
 
@@ -514,8 +519,9 @@ def construct_prompt(template_path: Path, reference: str, analyzer_result: str, 
 # Step 1f — Feed to LLM
 # ---------------------------------------------------------------------------
 
-def call_llm(prompt: str, config: EnvConfig) -> str:
-    """Call the OpenAI-compatible endpoint and return the raw text response."""
+def call_llm(messages: list[dict], config: EnvConfig) -> str:
+    """Call the OpenAI-compatible endpoint with the given conversation and
+    return the raw text response."""
     client = OpenAI(
         api_key=config.ai_key,
         base_url=config.ai_endpoint,
@@ -524,10 +530,7 @@ def call_llm(prompt: str, config: EnvConfig) -> str:
     print(f"[1f] Calling LLM (model={config.ai_model})...")
     completion = client.chat.completions.create(
         model=config.ai_model,
-        messages=[
-            {"role": "system", "content": "You are a performance engineering assistant that produces git patches."},
-            {"role": "user", "content": prompt},
-        ],
+        messages=messages,
         temperature=0.2,
     )
     text = completion.choices[0].message.content or ""
@@ -558,6 +561,85 @@ def extract_patch(llm_result: str) -> tuple[str, str]:
 
     print(f"[1g] Extracted patch ({len(patch)} chars) and summary ({len(summary)} chars).")
     return summary, patch
+
+
+# ---------------------------------------------------------------------------
+# Step 1f/1g — Generate a patch, retrying once (fed the git-apply error) if
+# extraction or a `git apply --check` dry-run fails.
+# ---------------------------------------------------------------------------
+
+def _git_apply_check(patch: str) -> str | None:
+    """Dry-run `git apply --check` against the patch from the repository root.
+
+    Does not mutate the working tree. Returns None if the patch would apply
+    cleanly, or the captured error message otherwise (never raises).
+    """
+    _ensure_artifacts_dir()
+    patch_file = Config.ARTIFACTS_DIR / "patch_check.diff"
+    patch_file.write_text(patch + "\n", encoding="utf-8")
+    try:
+        result = subprocess.run(
+            ["git", "apply", "--check", "--whitespace=fix", str(patch_file)],
+            capture_output=True, text=True, timeout=Config.GIT_OPERATIONS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return f"git apply --check timed out after {Config.GIT_OPERATIONS_TIMEOUT_SECONDS}s"
+    if result.returncode != 0:
+        return result.stderr.strip() or "git apply --check failed with no stderr output"
+    return None
+
+
+def generate_valid_patch(prompt: str, config: EnvConfig) -> tuple[str, str, str]:
+    """Call the LLM and extract a SUMMARY/PATCH, verifying the patch applies.
+
+    If extraction fails or the patch fails a `git apply --check` dry-run, the
+    error is fed back to the LLM as a follow-up message asking for a
+    corrected response, up to ``Config.MAX_PATCH_ATTEMPTS`` total generations.
+
+    Returns (summary, patch, llm_result) from the first attempt whose patch
+    checks out cleanly. Raises AnalyzerError("1h") if no attempt does.
+    """
+    messages = [
+        {"role": "system", "content": "You are a performance engineering assistant that produces git patches."},
+        {"role": "user", "content": prompt},
+    ]
+
+    last_error = "unknown error"
+    for attempt in range(1, Config.MAX_PATCH_ATTEMPTS + 1):
+        llm_result = call_llm(messages, config)
+        _write_artifact(f"llm_result_attempt{attempt}.txt", llm_result)
+
+        try:
+            summary, patch = extract_patch(llm_result)
+        except AnalyzerError as exc:
+            last_error = exc.message
+            print(f"[1g] Attempt {attempt}/{Config.MAX_PATCH_ATTEMPTS}: {last_error}")
+        else:
+            check_error = _git_apply_check(patch)
+            if check_error is None:
+                print(f"[1g] Attempt {attempt}/{Config.MAX_PATCH_ATTEMPTS}: patch applies cleanly.")
+                return summary, patch, llm_result
+            last_error = f"`git apply --check` failed:\n{check_error}"
+            print(f"[1g] Attempt {attempt}/{Config.MAX_PATCH_ATTEMPTS}: {last_error}")
+
+        if attempt < Config.MAX_PATCH_ATTEMPTS:
+            messages.append({"role": "assistant", "content": llm_result})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Your previous response could not be turned into an applied git patch:\n\n"
+                    f"{last_error}\n\n"
+                    "Reply again in the exact same SUMMARY/PATCH format described earlier, "
+                    "fixing the issue — check that there is exactly one ```diff fence, and that "
+                    "file paths and hunk `@@ -a,b +c,d @@` line counts match the repository "
+                    "content given earlier."
+                ),
+            })
+
+    raise AnalyzerError(
+        "1h",
+        f"No valid patch produced after {Config.MAX_PATCH_ATTEMPTS} attempt(s). Last error: {last_error}",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -769,17 +851,15 @@ def main() -> int:
         _write_artifact("prompt.txt", prompt)
         _record_step("1e", "ok")
 
-        # 1f — feed to LLM
-        llm_result = call_llm(prompt, config)
+        # 1f/1g — feed to LLM and extract a patch, retrying once (with the
+        # `git apply --check` error fed back) if it doesn't apply cleanly.
+        summary, patch, llm_result = generate_valid_patch(prompt, config)
         _write_artifact("llm_result.txt", llm_result)
-        _record_step("1f", "ok")
-
-        # 1g — extract patch
-        summary, patch = extract_patch(llm_result)
         _write_artifact("patch.diff", patch + "\n")
+        _record_step("1f", "ok")
         _record_step("1g", "ok")
 
-        # 1h — apply patch
+        # 1h — apply patch (already verified via `git apply --check` above)
         apply_patch(repo, patch)
         _record_step("1h", "ok")
 
