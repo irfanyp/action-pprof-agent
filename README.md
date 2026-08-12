@@ -31,6 +31,7 @@ See [`examples/workflow.yml`](examples/workflow.yml) for a complete `workflow_di
 | `tags` | yes | — | Repository checkout branch/tag (git ref) to analyze. Expected to come from a `workflow_dispatch` input. |
 | `analyzer_result_file` | no | `""` | Optional path to a raw pprof profile file (e.g. `pprof.pprof-dummy-go.samples.cpu.001.pb.gz`). When set, the action skips the `SERVICE_URL` trigger/poll/submit steps (1a, 1b, 1k) and loads the raw pprof profile from this file instead. The profile is then converted to markdown via `pprof-to-md`. Intended for testing. |
 | `service_url` | no | `https://analyzer.internal/api/v1` | Base URL of the pprof analyzer service API. Used for triggering runs, polling results, and flagging status (steps 1a, 1b, 1k, and 2a). Override this to point to a staging or alternative analyzer service. |
+| `base_branch` | no | `""` | Branch to open the Pull Request against. When unset, the PR targets the repository's default branch (auto-detected via `gh repo view`), regardless of whether `tags` is a branch or a tag. |
 
 
 
@@ -57,7 +58,7 @@ The action runs a Python orchestration script (`scripts/analyzer.py`) that perfo
 | **1g** | Extract the `git patch` (unified diff) and summary from the LLM result. |
 | **1h** | Apply the patch with `git apply`. |
 | **1i** | Write artifacts (`patch.diff`, `llm_result.txt`, `repomix_result.xml`, `analyzer_result.md`, `raw_profile.pb.gz`) to `./artifacts/`; the composite action uploads them as workflow artifacts. |
-| **1j** | Create a new branch, commit, push, and open a Pull Request via `gh pr create`. The PR description is derived from the LLM summary. |
+| **1j** | Create a new branch, commit, push, and open a Pull Request via `gh pr create`. The PR targets the repository's default branch (auto-detected via `gh repo view`) unless `base_branch` is set. The PR description is derived from the LLM summary. |
 | **1k** | `POST {SERVICE_URL}/runs/{run_id}/submit` — flag the execution as done/submitted. |
 
 

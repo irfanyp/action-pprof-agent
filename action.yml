@@ -53,6 +53,13 @@ inputs:
       (e.g. `https://analyzer-staging.internal/api/v1`).
     required: false
     default: 'https://analyzer.internal/api/v1'
+  base_branch:
+    description: |-
+      Optional branch to open the Pull Request against. When unset, the PR
+      targets the repository's default branch, auto-detected via
+      `gh repo view`.
+    required: false
+    default: ''
 
 
 
@@ -152,6 +159,7 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
         ANALYZER_RESULT_FILE: ${{ inputs.analyzer_result_file }}
         SERVICE_URL: ${{ inputs.service_url }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
       run: |
         python "${ACTION_PATH}/scripts/analyzer.py"
 

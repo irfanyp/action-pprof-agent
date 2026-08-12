@@ -94,6 +94,7 @@ class EnvConfig:
             "SERVICE_URL", "https://analyzer.internal/api/v1"
         ).rstrip("/")
         self.analyzer_result_file = self._get_optional("ANALYZER_RESULT_FILE", None)
+        self.base_branch = self._get_optional("BASE_BRANCH", "")
         self.github_server_url = self._get_optional(
             "GITHUB_SERVER_URL", "https://github.com"
         ).rstrip("/")
@@ -434,15 +435,27 @@ def local_run_id() -> str:
 
 
 def prepare_git_checkout(tags: str) -> git.Repo:
-    """Ensure we are on the requested branch and the repo is usable."""
+    """Ensure we are on the requested branch/tag and the repo is usable."""
     try:
         repo = git.Repo(os.getcwd())
     except git.InvalidGitRepositoryError as exc:
         raise AnalyzerError("1c", f"Not a git repository: {exc}") from exc
 
-    current = repo.active_branch.name if not repo.head.is_detached else repo.head.commit.hexsha
+    if repo.head.is_detached:
+        # Checking out a tag or SHA leaves the repo in detached HEAD; compare
+        # the commit we're on against what `tags` resolves to (not the raw
+        # tag string, which would never match a commit SHA).
+        current = repo.head.commit.hexsha
+        try:
+            mismatched = current != repo.git.rev_parse(tags)
+        except git.GitCommandError:
+            mismatched = False
+    else:
+        current = repo.active_branch.name
+        mismatched = current != tags
+
     print(f"[1c] Current checkout: {current} (requested: {tags})")
-    if current != tags:
+    if mismatched:
         # checkout already happened in the composite action; warn if mismatched.
         msg = f"Checked-out ref '{current}' differs from requested '{tags}'"
         _gh_annotation("warning", msg, "1c")
@@ -567,10 +580,24 @@ def apply_patch(repo: git.Repo, patch: str) -> None:
 # Step 1j — Create branch, commit, push, open PR
 # ---------------------------------------------------------------------------
 
+def _resolve_default_branch(step: str) -> str:
+    """Resolve the repository's default branch via `gh repo view`."""
+    branch = _run_command(
+        ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+        step,
+        timeout=Config.GH_CLI_TIMEOUT_SECONDS,
+        error_prefix="gh repo view",
+    ).strip()
+    if not branch:
+        raise AnalyzerError(step, "Could not resolve repository default branch via `gh repo view`.")
+    return branch
+
+
 def create_pull_request(repo: git.Repo, run_id: str, summary: str, config: EnvConfig) -> tuple[str, str]:
     """Create a branch, commit the applied changes, push, and open a PR via gh."""
     branch_name = f"pprof/fix-{run_id}"
-    base_branch = repo.active_branch.name if not repo.head.is_detached else config.tags
+    base_branch = config.base_branch or _resolve_default_branch("1j")
+    print(f"[1j] PR base branch: {base_branch}")
 
     # Create and checkout the new branch.
     print(f"[1j] Creating branch {branch_name}")
