@@ -30,6 +30,7 @@ See [`examples/workflow.yml`](examples/workflow.yml) for a complete `workflow_di
 | `reference` | yes | — | User reference option: `low`, `med`, or `high`. Controls analysis depth/strictness. Expected to come from a `workflow_dispatch` input. |
 | `tags` | yes | — | Repository checkout branch/tag (git ref) to analyze. Expected to come from a `workflow_dispatch` input. |
 | `analyzer_result_file` | no | `""` | Optional path to a raw pprof profile file (e.g. `pprof.pprof-dummy-go.samples.cpu.001.pb.gz`). When set, the action skips the `SERVICE_URL` trigger/poll/submit steps (1a, 1b, 1k) and loads the raw pprof profile from this file instead. The profile is then converted to markdown via `pprof-to-md`. Intended for testing. |
+| `service_url` | no | `https://analyzer.internal/api/v1` | Base URL of the pprof analyzer service API. Used for triggering runs, polling results, and flagging status (steps 1a, 1b, 1k, and 2a). Override this to point to a staging or alternative analyzer service. |
 
 
 
@@ -121,7 +122,7 @@ When `analyzer_result_file` is unset (the default), the normal `SERVICE_URL` flo
 
 ## SERVICE_URL REST contract
 
-`SERVICE_URL` is hardcoded in `scripts/analyzer.py` (default: `https://analyzer.internal/api/v1`). Authentication uses `Authorization: Bearer <ai_key>`.
+`SERVICE_URL` is configurable via the `service_url` action input (default: `https://analyzer.internal/api/v1`). Authentication uses `Authorization: Bearer <ai_key>`.
 
 | Step | Method & Path | Request body | Response |
 |---|---|---|---|

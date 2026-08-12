@@ -29,6 +29,11 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  # Prevent overlapping runs on the same branch/tag from racing on PR creation.
+  group: pprof-analyzer-${{ inputs.tags }}
+  cancel-in-progress: false
+
 jobs:
   analyze:
     runs-on: ubuntu-latest

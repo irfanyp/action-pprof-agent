@@ -405,6 +405,7 @@ def call_llm(prompt: str) -> str:
     client = OpenAI(
         api_key=os.environ["AI_KEY"],
         base_url=os.environ["AI_ENDPOINT"],
+        timeout=300,  # 5 minutes — prevents indefinite hang on unresponsive endpoints
     )
     model = os.environ["AI_MODEL"]
     print(f"[1f] Calling LLM (model={model})...")
@@ -478,12 +479,10 @@ def create_pull_request(repo: git.Repo, run_id: str, summary: str) -> tuple[str,
     # Stage all changes.
     repo.git.add(A=True)
 
-    # Check if there is anything to commit.
-    if not repo.is_dirty() and not repo.untracked_files:
-        # `git add -A` may have staged nothing if patch was empty.
-        diff = repo.git.diff("--cached")
-        if not diff.strip():
-            raise AnalyzerError("1j", "No changes to commit after applying the patch.")
+    # Check if there is anything to commit (patch may have been empty).
+    diff = repo.git.diff("--cached")
+    if not diff.strip():
+        raise AnalyzerError("1j", "No changes to commit after applying the patch.")
 
     commit_msg = f"pprof-analyzer: fix for run {run_id}\n\n{summary}"
     repo.index.commit(commit_msg)
@@ -500,7 +499,10 @@ def create_pull_request(repo: git.Repo, run_id: str, summary: str) -> tuple[str,
         text=True,
     )
     if push_result.returncode != 0:
-        raise AnalyzerError("1j", f"git push failed: {push_result.stderr}")
+        # Redact the token from stderr so it does not leak into logs,
+        # annotations, or the SERVICE_URL error endpoint.
+        safe_stderr = push_result.stderr.replace(token, "***")
+        raise AnalyzerError("1j", f"git push failed: {safe_stderr}")
 
     # Create the PR via gh CLI.
     pr_body = f"""## pprof-analyzer automated fix
