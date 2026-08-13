@@ -15,7 +15,9 @@ repomix-output/
 .vscode/
 
 # AI / LLM generated markdown output
-.ai_output/
+# Track the folder itself, but ignore everything inside it
+.ai_output/*
+!.ai_output/.gitkeep
 
 # Other
 server/
