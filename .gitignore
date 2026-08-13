@@ -4,6 +4,7 @@ node_modules/
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Local action artifacts
 artifacts/
@@ -11,3 +12,10 @@ repomix-output/
 
 # IDE / tooling
 .workspace_rag/
+.vscode/
+
+# AI / LLM generated markdown output
+.ai_output/
+
+# Other
+server/
