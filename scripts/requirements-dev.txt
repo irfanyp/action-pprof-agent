@@ -1,0 +1,5 @@
+# Development / test dependencies.
+# Install with:  pip install -r scripts/requirements-dev.txt
+-r requirements.txt
+pytest~=8.4.0
+pytest-mock~=3.14.0
