@@ -1,8 +1,43 @@
 """Unit tests for scripts/analyzer.py.
 
-Tests are organized in two tiers:
-  1. Pure-function tests — no mocking required (highest ROI).
-  2. Mocked integration tests — verify external interaction logic.
+This test suite validates the pprof-analyzer orchestration script, which implements
+a multi-step workflow to analyze CPU profiles, generate optimization suggestions via
+an LLM, and create pull requests with proposed fixes.
+
+## Test Organization
+
+Tests are split into two tiers to maximize ROI and maintainability:
+
+### Tier 1: Pure-Function Tests (no mocking required)
+These test business logic in isolation and catch refactoring regressions early.
+Classes: TestExtractPatch, TestConstructPrompt, TestDecodePprofResult, TestEnvConfig,
+         TestGhAnnotation, TestNodeBin, TestLocalRunId, TestWriteStepSummary,
+         TestRecordStep, TestWriteArtifact, TestSetOutput, TestLoadAnalyzerResultFromFile,
+         TestAnalyzerError
+
+### Tier 2: Mocked Integration Tests
+These test external interactions (API calls, subprocess, git) with mocks to verify
+error handling and correct payloads without actual side effects.
+Classes: TestServiceRequest, TestTriggerAnalyzer, TestPollAnalyzerResult,
+         TestRunCommand, TestGitApplyCheck, TestGenerateValidPatch, TestCallLlm,
+         TestFlagSubmitted, TestFlagError, TestCreatePullRequest, TestApplyPatch,
+         TestConvertPprofToMarkdown, TestRunRepomix, TestPrepareGitCheckout
+
+## Workflow Steps Reference
+
+The analyzer.py workflow follows these numbered steps (see Config.STEP_DESCRIPTIONS):
+  1a: Trigger analyzer via service API
+  1b: Poll result, decode pprof, convert to markdown
+  1c: Validate git checkout state
+  1d: Run repomix to generate code context
+  1e: Construct the LLM prompt
+  1f: Call the LLM with the prompt
+  1g: Extract patch from LLM result
+  1h: Apply patch to git repo
+  1j: Create pull request
+  1k: Flag execution as submitted
+
+To find tests for a specific step, search for the step label in test class names.
 """
 from __future__ import annotations
 
@@ -50,12 +85,20 @@ from analyzer import (
 
 
 # ============================================================================
-# Tier 1: Pure-function tests (no mocking)
+# Tier 1: Pure-Function Tests (no mocking required)
+# ============================================================================
+# These tests validate business logic in isolation without mocks. They catch
+# refactoring errors early and provide the highest ROI per test.
 # ============================================================================
 
 
 class TestExtractPatch:
-    """Tests for extract_patch() — the critical regex extraction logic."""
+    """Tests for extract_patch() — the critical regex extraction logic.
+
+    extract_patch() parses LLM results to extract the SUMMARY and PATCH sections.
+    It must handle various fence formats (```diff, ```diff-python, etc.) and
+    provide helpful error messages when extraction fails.
+    """
 
     def test_extract_patch_basic(self, sample_llm_result):
         """A well-formed LLM result yields summary and patch."""
@@ -113,7 +156,11 @@ class TestExtractPatch:
 
 
 class TestConstructPrompt:
-    """Tests for construct_prompt() — template formatting."""
+    """Tests for construct_prompt() — template formatting.
+
+    construct_prompt() loads a template file and substitutes {reference_level},
+    {analyzer_result}, and {repomix_result} placeholders with actual data.
+    """
 
     def test_construct_prompt_substitutes_placeholders(
         self, tmp_path, sample_prompt_template
@@ -151,7 +198,11 @@ class TestConstructPrompt:
 
 
 class TestDecodePprofResult:
-    """Tests for _decode_pprof_result() — base64 decoding."""
+    """Tests for _decode_pprof_result() — base64 decoding.
+
+    _decode_pprof_result() decodes a base64-encoded pprof binary and writes it
+    to disk. Must reject invalid base64 and empty results.
+    """
 
     def test_decode_valid_base64(self, tmp_artifacts_dir):
         """Valid base64 data is decoded and written to disk."""
@@ -180,7 +231,12 @@ class TestDecodePprofResult:
 
 
 class TestEnvConfig:
-    """Tests for EnvConfig — environment variable loading and validation."""
+    """Tests for EnvConfig — environment variable loading and validation.
+
+    EnvConfig is the single source of truth for all required env vars. It validates
+    required fields, optional fields with defaults, and enum constraints. Missing or
+    invalid vars raise AnalyzerError('init').
+    """
 
     def test_valid_env_config(self, set_env):
         """All valid env vars produce a correctly populated EnvConfig."""
@@ -301,7 +357,11 @@ class TestEnvConfig:
 
 
 class TestGhAnnotation:
-    """Tests for _gh_annotation() — GitHub Actions annotation encoding."""
+    """Tests for _gh_annotation() — GitHub Actions annotation encoding.
+
+    _gh_annotation() formats messages as GitHub Actions annotations (::error::, etc.)
+    and percent-encodes special characters (%, newlines, carriage returns).
+    """
 
     def test_basic_annotation(self, capfd):
         """A basic annotation is printed with the correct format."""
@@ -526,7 +586,12 @@ class TestLoadAnalyzerResultFromFile:
 
 
 class TestAnalyzerError:
-    """Tests for the AnalyzerError exception class."""
+    """Tests for the AnalyzerError exception class.
+
+    AnalyzerError carries a step label (1a, 1b, etc.) and a message. It's raised
+    whenever a step in the 1b-1j workflow fails, allowing error handling to identify
+    which step failed.
+    """
 
     def test_analyzer_error_attributes(self):
         """AnalyzerError stores step and message."""
@@ -547,12 +612,21 @@ class TestAnalyzerError:
 
 
 # ============================================================================
-# Tier 2: Mocked integration tests
+# Tier 2: Mocked Integration Tests
+# ============================================================================
+# These tests validate external interactions (API calls, subprocess, git) using
+# mocks. They verify correct payloads, error handling, and state transitions
+# without actual side effects.
 # ============================================================================
 
 
+# Step 1a: Trigger analyzer
 class TestServiceRequest:
-    """Tests for _service_request() — HTTP API interaction."""
+    """Tests for _service_request() — HTTP API interaction.
+
+    _service_request() is the low-level wrapper for GET/POST requests to the
+    analyzer service. It handles authorization, error responses, and network failures.
+    """
 
     def test_get_request_success(self, mocker):
         """A successful GET request returns parsed JSON."""
@@ -633,8 +707,13 @@ class TestServiceRequest:
         assert kwargs["json"] == payload
 
 
+# Step 1a (continued)
 class TestTriggerAnalyzer:
-    """Tests for trigger_analyzer() — step 1a."""
+    """Tests for trigger_analyzer() — step 1a.
+
+    trigger_analyzer() POSTs to /runs with reference, tags, and repository,
+    then extracts and returns the run_id. Missing or empty run_id raises error.
+    """
 
     def test_trigger_success(self, mocker, mock_config):
         """A successful trigger returns the run_id."""
@@ -689,8 +768,14 @@ class TestTriggerAnalyzer:
         }
 
 
+# Step 1b: Poll analyzer result
 class TestPollAnalyzerResult:
-    """Tests for poll_analyzer_result() — step 1b polling loop."""
+    """Tests for poll_analyzer_result() — step 1b polling loop.
+
+    poll_analyzer_result() polls /runs/{run_id} until 'completed' or 'error'.
+    On completion, it decodes the base64 result. Must handle pending/running states,
+    errors, empty results, and timeouts.
+    """
 
     def test_poll_completed_immediately(self, mocker, mock_config, tmp_artifacts_dir):
         """When the first poll returns 'completed', the result is decoded."""
@@ -763,8 +848,13 @@ class TestPollAnalyzerResult:
         assert result_path.read_bytes() == raw_data
 
 
+# Step 1d: Run repomix (and git operations)
 class TestRunCommand:
-    """Tests for _run_command() — subprocess execution."""
+    """Tests for _run_command() — subprocess execution.
+
+    _run_command() wraps subprocess.run() with timeout, error handling, and
+    stderr capture. Used for git, repomix, and other external commands.
+    """
 
     def test_run_command_success(self, mocker):
         """A successful command returns stdout."""
@@ -826,7 +916,11 @@ class TestRunCommand:
 
 
 class TestGitApplyCheck:
-    """Tests for _git_apply_check() — dry-run patch validation."""
+    """Tests for _git_apply_check() — dry-run patch validation.
+
+    _git_apply_check() runs `git apply --check` on a patch without modifying
+    the working directory. Returns None on success, error message on failure.
+    """
 
     def test_check_clean_patch(self, mocker, tmp_artifacts_dir):
         """A patch that applies cleanly returns None."""
@@ -883,8 +977,16 @@ class TestGitApplyCheck:
         assert "--check" in cmd
 
 
+# Step 1f-1g: Call LLM and extract patch
 class TestGenerateValidPatch:
-    """Tests for generate_valid_patch() — LLM call + patch extraction + retry."""
+    """Tests for generate_valid_patch() — LLM call + patch extraction + retry.
+
+    generate_valid_patch() orchestrates the LLM call and patch validation:
+    1. Calls the LLM
+    2. Extracts patch from result
+    3. Validates with `git apply --check`
+    4. On failure, retries up to MAX_PATCH_ATTEMPTS times with error feedback
+    """
 
     def test_first_attempt_succeeds(self, mocker, mock_config, tmp_artifacts_dir, sample_llm_result):
         """When the first LLM result produces a valid patch, it's returned."""
@@ -1009,7 +1111,11 @@ Ok.
 
 
 class TestCallLlm:
-    """Tests for call_llm() — LLM API interaction."""
+    """Tests for call_llm() — LLM API interaction.
+
+    call_llm() creates an OpenAI client, sends messages, and returns the response
+    text. Configured with ai_key, ai_endpoint, and ai_model from config.
+    """
 
     def test_call_llm_returns_text(self, mocker, mock_config):
         """The LLM response text is returned."""
@@ -1070,8 +1176,13 @@ class TestCallLlm:
         assert kwargs["model"] == mock_config.ai_model
 
 
+# Step 1h-1k: Apply patch and finalize
 class TestFlagSubmitted:
-    """Tests for flag_submitted() — step 1k."""
+    """Tests for flag_submitted() — step 1k.
+
+    flag_submitted() POSTs to /runs/{run_id}/submit with the PR URL and number
+    to record that the execution completed and a PR was created.
+    """
 
     def test_flag_submitted_success(self, mocker, mock_config):
         """A successful submit flag calls _service_request."""
@@ -1101,7 +1212,11 @@ class TestFlagSubmitted:
 
 
 class TestFlagError:
-    """Tests for flag_error() — step 2a."""
+    """Tests for flag_error() — step 2a.
+
+    flag_error() POSTs to /runs/{run_id}/error with the failing step and error
+    message. It must not raise exceptions itself (swallows errors from the service).
+    """
 
     def test_flag_error_success(self, mocker, mock_config):
         """A successful error flag calls _service_request."""
@@ -1141,7 +1256,12 @@ class TestFlagError:
 
 
 class TestCreatePullRequest:
-    """Tests for create_pull_request() — step 1j."""
+    """Tests for create_pull_request() — step 1j.
+
+    create_pull_request() commits the applied patch, pushes to a feature branch,
+    and opens a pull request via the GitHub CLI. Must handle no-changes error,
+    token redaction, and base branch resolution.
+    """
 
     def test_create_pr_success(self, mocker, mock_config, tmp_path):
         """A successful PR creation returns URL and number."""
@@ -1230,7 +1350,11 @@ class TestCreatePullRequest:
 
 
 class TestApplyPatch:
-    """Tests for apply_patch() — step 1h."""
+    """Tests for apply_patch() — step 1h.
+
+    apply_patch() writes the patch to a file and runs `git apply --whitespace=fix`
+    to apply it to the working directory.
+    """
 
     def test_apply_patch_success(self, mocker, tmp_artifacts_dir):
         """A successful patch application calls git apply."""
@@ -1260,7 +1384,11 @@ class TestApplyPatch:
 
 
 class TestConvertPprofToMarkdown:
-    """Tests for convert_pprof_to_markdown() — step 1b conversion."""
+    """Tests for convert_pprof_to_markdown() — step 1b conversion.
+
+    convert_pprof_to_markdown() runs the pprof-to-md node binary on a raw profile
+    and reads the markdown output file.
+    """
 
     def test_convert_success(self, mocker, tmp_artifacts_dir, tmp_path):
         """A successful conversion returns the markdown content."""
@@ -1312,7 +1440,11 @@ class TestConvertPprofToMarkdown:
 
 
 class TestRunRepomix:
-    """Tests for run_repomix() — step 1d."""
+    """Tests for run_repomix() — step 1d.
+
+    run_repomix() executes the repomix tool to generate an XML representation
+    of the repository for use in the LLM prompt.
+    """
 
     def test_run_repomix_success(self, mocker, tmp_path, monkeypatch):
         """A successful repomix run returns the XML content."""
@@ -1352,7 +1484,11 @@ class TestRunRepomix:
 
 
 class TestPrepareGitCheckout:
-    """Tests for prepare_git_checkout() — step 1c."""
+    """Tests for prepare_git_checkout() — step 1c.
+
+    prepare_git_checkout() validates that the repo is on the correct branch/tag
+    and returns the Repo object for subsequent git operations.
+    """
 
     def test_prepare_checkout_on_branch_match(self, mocker):
         """When on the correct branch, no warning is emitted."""

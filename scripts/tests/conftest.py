@@ -1,8 +1,13 @@
-"""Shared pytest fixtures for pprof-analyzer tests."""
+"""Shared pytest fixtures for pprof-analyzer tests.
+
+Fixtures are organized into three categories:
+  1. Environment setup (valid_env_vars, set_env, tmp_artifacts_dir)
+  2. Mock/dependency fixtures (mock_config)
+  3. Sample data fixtures (sample_llm_result, sample_prompt_template, etc.)
+"""
 from __future__ import annotations
 
 import base64
-import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -14,6 +19,11 @@ import pytest
 import sys
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
+
+
+# ============================================================================
+# Environment & Configuration Fixtures
+# ============================================================================
 
 
 @pytest.fixture
@@ -35,7 +45,11 @@ def valid_env_vars() -> dict[str, str]:
 
 @pytest.fixture
 def set_env(monkeypatch, valid_env_vars):
-    """Set all valid env vars via monkeypatch."""
+    """Populate all required env vars for a complete test environment.
+
+    Intended for tests that need EnvConfig to be instantiated.
+    Returns the env vars dict for reference if needed.
+    """
     for key, val in valid_env_vars.items():
         monkeypatch.setenv(key, val)
     return valid_env_vars
@@ -43,7 +57,11 @@ def set_env(monkeypatch, valid_env_vars):
 
 @pytest.fixture
 def tmp_artifacts_dir(tmp_path, monkeypatch):
-    """Redirect Config.ARTIFACTS_DIR to a temp directory."""
+    """Redirect Config.ARTIFACTS_DIR to a temp directory for file I/O tests.
+
+    Isolates artifact writing tests so they don't pollute the real artifacts/
+    directory and can use pytest's tmp_path for automatic cleanup.
+    """
     import analyzer
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -52,8 +70,42 @@ def tmp_artifacts_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def mock_config():
+    """A mock EnvConfig for tests that don't need real env validation.
+
+    Used when testing functions that accept a config object but don't need
+    the full environment variable validation logic.
+    """
+    config = MagicMock()
+    config.service_url = "https://analyzer.test/api/v1"
+    config.ai_key = "test-ai-key"
+    config.ai_endpoint = "https://llm.test/v1"
+    config.ai_model = "gamma4"
+    config.token = "ghp_testtoken"
+    config.base_branch = ""
+    config.repository = "owner/repo"
+    config.tags = "main"
+    config.reference = "med"
+    config.action_path = Path("/tmp/action")
+    config.analyzer_result_file = None
+    return config
+
+
+
+# ============================================================================
+# Sample Data Fixtures: LLM Results
+# ============================================================================
+
+
+@pytest.fixture
 def sample_llm_result() -> str:
-    """A realistic LLM result with SUMMARY and PATCH sections."""
+    """A realistic, well-formed LLM result with SUMMARY and PATCH sections.
+
+    This is the golden-path example — used by most tests. It includes:
+    - A SUMMARY section with a markdown table
+    - A PATCH section with a valid unified diff
+    - Both sections properly delineated with ### headers
+    """
     return """### SUMMARY
 
 | ID | File Path | Function | Self % | Max Reduction | Confidence | Priority |
@@ -92,7 +144,10 @@ The `buildUsers` function has an O(n²) uniqueness scan that dominates CPU time.
 
 @pytest.fixture
 def sample_llm_result_no_summary() -> str:
-    """An LLM result with a patch but no SUMMARY section."""
+    """LLM result with a valid patch but missing the SUMMARY section.
+
+    Tests fallback to the default summary when no SUMMARY header is found.
+    """
     return """Here is the fix:
 
 ```diff
@@ -108,13 +163,19 @@ def sample_llm_result_no_summary() -> str:
 
 @pytest.fixture
 def sample_llm_result_no_patch() -> str:
-    """An LLM result with no diff code fence at all."""
+    """LLM result with no diff code fence at all (error case).
+
+    Tests that extraction fails gracefully when the LLM doesn't provide a patch.
+    """
     return "I couldn't find any issues to fix. Everything looks good!"
 
 
 @pytest.fixture
 def sample_llm_result_empty_patch() -> str:
-    """An LLM result with an empty diff fence."""
+    """LLM result with a diff fence that is empty (error case).
+
+    Tests that extraction rejects empty patches.
+    """
     return """### SUMMARY
 
 No fix needed.
@@ -128,7 +189,10 @@ No fix needed.
 
 @pytest.fixture
 def sample_llm_result_diff_variant() -> str:
-    """An LLM result using ```diff-python variant fence."""
+    """LLM result using ```diff-python fence variant instead of just ```diff.
+
+    Tests that the regex pattern handles fence variants correctly.
+    """
     return """### SUMMARY
 
 Fixed the issue.
@@ -146,29 +210,20 @@ Fixed the issue.
 """
 
 
+# ============================================================================
+# Sample Data Fixtures: Templates and Prompts
+# ============================================================================
+
+
 @pytest.fixture
 def sample_prompt_template() -> str:
-    """A minimal prompt template with the expected placeholders."""
+    """A minimal prompt template with the expected {reference_level}, {analyzer_result},
+    {repomix_result} placeholders.
+
+    Used by construct_prompt() tests to verify template substitution.
+    """
     return (
         "Reference: {reference_level}\n"
         "Analyzer:\n{analyzer_result}\n"
         "Repo:\n{repomix_result}\n"
     )
-
-
-@pytest.fixture
-def mock_config():
-    """A mock EnvConfig for tests that don't need real env validation."""
-    config = MagicMock()
-    config.service_url = "https://analyzer.test/api/v1"
-    config.ai_key = "test-ai-key"
-    config.ai_endpoint = "https://llm.test/v1"
-    config.ai_model = "gamma4"
-    config.token = "ghp_testtoken"
-    config.base_branch = ""
-    config.repository = "owner/repo"
-    config.tags = "main"
-    config.reference = "med"
-    config.action_path = Path("/tmp/action")
-    config.analyzer_result_file = None
-    return config
