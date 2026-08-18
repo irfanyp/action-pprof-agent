@@ -639,12 +639,17 @@ def call_llm(messages: list[dict], config: EnvConfig, tools: list[dict] | None =
         print(f"[1f] LLM made {len(tool_calls)} tool call(s).")
 
         # Add the assistant's response (with tool calls) to the conversation
-        messages.append({"role": "assistant", "content": text, "tool_calls": [
-            {"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-            for tc in tool_calls
-        ]})
+        assistant_msg = {
+            "role": "assistant",
+            "content": text,
+            "tool_calls": [
+                {"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in tool_calls
+            ]
+        }
+        messages.append(assistant_msg)
 
-        # Process each tool call
+        # Process each tool call and add tool responses
         for i, tool_call in enumerate(tool_calls, 1):
             tool_name = tool_call.function.name
             tool_input = tool_call.function.arguments
@@ -659,11 +664,11 @@ def call_llm(messages: list[dict], config: EnvConfig, tools: list[dict] | None =
                 result = f"ERROR: Unknown tool {tool_name}"
                 print(f"[1f]   → ERROR: Unknown tool")
 
-            # Add tool result to the conversation
+            # Add tool result to the conversation (role must be "tool", not "user")
             messages.append({
-                "role": "user",
-                "content": f"Tool result for {tool_name}: {result}",
+                "role": "tool",
                 "tool_call_id": tool_id,
+                "content": result,
             })
 
         tool_calls_made += len(tool_calls)
