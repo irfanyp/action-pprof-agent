@@ -57,6 +57,7 @@ from analyzer import (
     EnvConfig,
     STEP_RESULTS,
     _decode_pprof_result,
+    _execute_read_file_tool,
     _gh_annotation,
     _git_apply_check,
     _node_bin,
@@ -79,6 +80,7 @@ from analyzer import (
     local_run_id,
     poll_analyzer_result,
     prepare_git_checkout,
+    read_file_context,
     trigger_analyzer,
 )
 
@@ -1448,6 +1450,128 @@ class TestConvertPprofToMarkdown:
             convert_pprof_to_markdown(tmp_path / "profile.pb.gz", action_path)
         assert exc_info.value.step == "1b"
         assert "did not produce" in exc_info.value.message.lower()
+
+
+class TestReadFileToolErrors:
+    """Tests for _execute_read_file_tool() error handling.
+
+    Validates graceful error handling for:
+    - Nonexistent files
+    - Permission issues
+    - Binary files
+    - Invalid JSON arguments
+    - Directory traversal attempts
+    - Invalid line ranges
+    """
+
+    def test_nonexistent_file_error(self):
+        """Reading a nonexistent file returns a helpful error message."""
+        result = read_file_context("nonexistent_file.go")
+        assert "File not found" in result
+        assert "ERROR" in result
+
+    def test_invalid_json_arguments(self):
+        """Invalid JSON in tool arguments returns a helpful error message."""
+        result = _execute_read_file_tool("not json at all")
+        assert "ERROR" in result
+        assert "Invalid JSON" in result
+        assert "file_path" in result.lower()
+
+    def test_missing_file_path_argument(self):
+        """Missing file_path argument returns an error."""
+        result = _execute_read_file_tool('{"line_range": "100-150"}')
+        assert "ERROR" in result
+        assert "file_path" in result.lower()
+
+    def test_invalid_line_range_format(self, tmp_path):
+        """Invalid line range format returns an error."""
+        test_file = tmp_path / "main.go"
+        test_file.write_text("package main\n\nfunc main() {}\n")
+        import json
+        tool_input = json.dumps({"file_path": str(test_file), "line_range": "invalid"})
+        result = _execute_read_file_tool(tool_input)
+        assert "ERROR" in result
+        assert "Invalid line range" in result or "line_range" in result.lower()
+
+    def test_line_range_beyond_file(self, tmp_path):
+        """Requesting lines beyond file length returns an error."""
+        test_file = tmp_path / "main.go"
+        test_file.write_text("line1\nline2\nline3\n")
+        import json
+        tool_input = json.dumps({"file_path": str(test_file), "line_range": "10-20"})
+        result = _execute_read_file_tool(tool_input)
+        assert "ERROR" in result
+        assert "beyond file length" in result or "Line 10 is beyond" in result
+
+    def test_directory_traversal_blocked(self):
+        """Directory traversal attempts are blocked."""
+        result = _execute_read_file_tool('{"file_path": "../../../etc/passwd"}')
+        assert "ERROR" in result
+        assert ".." in result or "directory traversal" in result.lower()
+
+    def test_reversed_line_range(self, tmp_path):
+        """Reversed line range (start > end) returns an error."""
+        test_file = tmp_path / "main.go"
+        test_file.write_text("line1\nline2\nline3\n")
+        import json
+        tool_input = json.dumps({"file_path": str(test_file), "line_range": "150-100"})
+        result = _execute_read_file_tool(tool_input)
+        assert "ERROR" in result
+        assert ("start must be" in result.lower() or "invalid" in result.lower())
+
+    def test_negative_line_range(self):
+        """Negative line numbers return an error."""
+        result = _execute_read_file_tool('{"file_path": "main.go", "line_range": "-10-50"}')
+        assert "ERROR" in result
+        assert ("line numbers must be" in result.lower() or "invalid" in result.lower())
+
+
+class TestReadFileContextErrors:
+    """Tests for read_file_context() error handling.
+
+    Tests low-level file reading error cases.
+    """
+
+    def test_binary_file_detection(self, tmp_path):
+        """Reading a binary file returns a helpful error."""
+        binary_file = tmp_path / "binary.go"
+        binary_file.write_bytes(b'\x89PNG\r\n\x1a\n' + b'not valid utf-8')
+
+        result = read_file_context(str(binary_file))
+        assert "ERROR" in result
+        assert ("binary" in result.lower() or "encoding" in result.lower())
+
+    def test_permission_denied(self, tmp_path, monkeypatch):
+        """Reading a file without permission returns an error."""
+        test_file = tmp_path / "noperm.go"
+        test_file.write_text("package main\n")
+
+        # Mock open to raise PermissionError
+        import builtins
+        original_open = builtins.open
+        def mock_open(*args, **kwargs):
+            if 'noperm.go' in str(args[0]):
+                raise PermissionError("Access denied")
+            return original_open(*args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", mock_open)
+        result = read_file_context(str(test_file))
+        assert "ERROR" in result
+        assert "Permission" in result or "permission" in result.lower()
+
+    def test_valid_file_read(self, tmp_path):
+        """Reading a valid file works correctly."""
+        test_file = tmp_path / "main.go"
+        content = "package main\n\nfunc main() {\n    fmt.Println(\"hello\")\n}\n"
+        test_file.write_text(content)
+
+        result = read_file_context(str(test_file))
+        assert "ERROR" not in result
+        assert "main" in result
+        assert "package" in result
+        # Should have line numbers
+        assert "1:" in result
+        assert "4:" in result
 
 
 class TestPrepareGitCheckout:

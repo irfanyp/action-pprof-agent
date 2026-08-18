@@ -397,19 +397,43 @@ def read_file_context(file_path: str, line_range: tuple[int, int] | None = None,
         if repo is None:
             repo = git.Repo(os.getcwd())
 
+        content = None
+        source = None
+
+        # Try to read from git first (most reliable in CI)
         try:
             content = repo.git.show(f"HEAD:{file_path}")
-        except git.GitCommandError:
-            # Fall back to filesystem if git doesn't have it
+            source = "git"
+        except git.GitCommandError as e:
+            # Fall back to filesystem
             if not os.path.exists(file_path):
-                return f"ERROR: File not found: {file_path}"
-            with open(file_path, 'r') as f:
-                content = f.read()
+                return f"ERROR: File not found in HEAD or filesystem: {file_path}"
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                source = "filesystem"
+            except UnicodeDecodeError:
+                return f"ERROR: File is binary or has invalid encoding: {file_path}"
+            except PermissionError:
+                return f"ERROR: Permission denied reading file: {file_path}"
+            except IOError as io_err:
+                return f"ERROR: Cannot read file: {file_path} ({io_err})"
+
+        if content is None:
+            return f"ERROR: File not found: {file_path}"
 
         lines = content.split('\n')
 
         if line_range:
             start, end = line_range
+            # Validate line range
+            if start < 1 or end < 1:
+                return f"ERROR: Invalid line range ({start}-{end}). Line numbers must be >= 1."
+            if start > end:
+                return f"ERROR: Invalid line range ({start}-{end}). Start must be <= end."
+            if start > len(lines):
+                return f"ERROR: Line {start} is beyond file length ({len(lines)} lines)."
+
             start = max(1, start - 3)  # Include 3 lines of context before
             end = min(len(lines), end + 3)  # Include 3 lines of context after
             lines = lines[start - 1:end]
@@ -621,20 +645,25 @@ def call_llm(messages: list[dict], config: EnvConfig, tools: list[dict] | None =
         ]})
 
         # Process each tool call
-        for tool_call in tool_calls:
+        for i, tool_call in enumerate(tool_calls, 1):
             tool_name = tool_call.function.name
             tool_input = tool_call.function.arguments
+            tool_id = tool_call.id
+
+            print(f"[1f] Tool call {i}/{len(tool_calls)}: {tool_name}")
 
             if tool_name == "read_file":
                 result = _execute_read_file_tool(tool_input, repo)
+                print(f"[1f]   → {len(result)} chars returned")
             else:
                 result = f"ERROR: Unknown tool {tool_name}"
+                print(f"[1f]   → ERROR: Unknown tool")
 
             # Add tool result to the conversation
             messages.append({
                 "role": "user",
                 "content": f"Tool result for {tool_name}: {result}",
-                "tool_call_id": tool_call.id,
+                "tool_call_id": tool_id,
             })
 
         tool_calls_made += len(tool_calls)
@@ -649,12 +678,18 @@ def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> st
     - "main.go" — read entire file
     - "main.go:100-150" — read lines 100-150
     - "utils.go:search_user" — read function (approximate by searching)
+
+    Returns error message if the tool input is invalid or file cannot be read.
     """
     import json
 
     try:
+        # Parse JSON arguments from the LLM
         if isinstance(tool_input, str):
-            params = json.loads(tool_input)
+            try:
+                params = json.loads(tool_input)
+            except json.JSONDecodeError as e:
+                return f"ERROR: Invalid JSON in tool arguments: {e}. Expected: {{'file_path': '...', 'line_range': '...' (optional)}}"
         else:
             params = tool_input
 
@@ -662,7 +697,11 @@ def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> st
         line_range = params.get("line_range")
 
         if not file_path:
-            return "ERROR: No file_path provided"
+            return "ERROR: No file_path provided. Use 'file_path' key in arguments."
+
+        # Validate file_path is not trying to escape directory
+        if ".." in file_path:
+            return f"ERROR: Invalid file path '{file_path}' — directory traversal not allowed"
 
         # Parse line_range if provided as string "100-150"
         if isinstance(line_range, str) and '-' in line_range:
@@ -670,11 +709,20 @@ def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> st
                 start, end = line_range.split('-')
                 line_range = (int(start.strip()), int(end.strip()))
             except ValueError:
-                line_range = None
+                return f"ERROR: Invalid line_range format '{line_range}'. Use 'start-end' format (e.g., '100-150')"
 
-        return read_file_context(file_path, line_range, repo)
+        result = read_file_context(file_path, line_range, repo)
+        return result
     except Exception as e:
-        return f"ERROR: Failed to read file: {e}"
+        # Return detailed error messages to help LLM correct its requests
+        import traceback
+        error_msg = str(e)
+        if "not found" in error_msg.lower() or "no such file" in error_msg.lower():
+            return f"ERROR: File not found: {tool_input}. Please check the file path and try again."
+        elif "permission" in error_msg.lower():
+            return f"ERROR: Permission denied reading file: {tool_input}. The file exists but cannot be read."
+        else:
+            return f"ERROR: Failed to read file: {error_msg}"
 
 
 # ---------------------------------------------------------------------------
