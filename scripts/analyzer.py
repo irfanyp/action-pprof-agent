@@ -6,9 +6,9 @@ Implements the flow described in the action spec:
   1a  Trigger analyzer execution via SERVICE_URL.
   1b  Poll SERVICE_URL for the analyzer result.
   1c  Verify / prepare the git checkout branch.
-  1d  Run `repomix` to produce an LLM-compatible XML of the repo.
+  1d  Generate file list for repo (repomix replaced by agent-loop file access).
   1e  Construct the prompt.
-  1f  Feed the prompt to the LLM.
+  1f  Feed the prompt to the LLM (with tool-use enabled for file access).
   1g  Extract the git patch from the LLM result.
   1h  Apply the git patch.
   1i  (Artifacts are written to ./artifacts; the composite action uploads them.)
@@ -21,6 +21,7 @@ If any step 1b-1j fails, step 2a flags the execution as error via SERVICE_URL.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 import subprocess
@@ -45,7 +46,6 @@ class Config:
     POLL_INTERVAL_SECONDS = 15
     POLL_TIMEOUT_SECONDS = 10 * 60
     PPROF_TO_MD_TIMEOUT_SECONDS = 60
-    REPOMIX_TIMEOUT_SECONDS = 120
     GIT_OPERATIONS_TIMEOUT_SECONDS = 120
     GH_CLI_TIMEOUT_SECONDS = 180
 
@@ -55,7 +55,6 @@ class Config:
     MAX_PATCH_ATTEMPTS = 2
 
     ARTIFACTS_DIR = Path("artifacts")
-    REPOMIX_OUTPUT_DIR = Path("repomix-output")
 
     VALID_REFERENCES = {"low", "med", "high"}
 
@@ -66,7 +65,7 @@ class Config:
         "1a": "Trigger analyzer",
         "1b": "Poll analyzer result / convert pprof",
         "1c": "Prepare git checkout",
-        "1d": "Run repomix",
+        "1d": "Generate file list (agent-loop file access)",
         "1e": "Construct prompt",
         "1f": "Feed prompt to LLM",
         "1g": "Extract git patch",
@@ -295,10 +294,10 @@ def _node_bin(name: str, action_path: Path) -> str:
     """Resolve an npm-installed CLI binary from the action's local node_modules.
 
     The composite action runs ``npm ci`` in ``${ACTION_PATH}`` (see action.yml),
-    which installs ``repomix`` and ``pprof-to-md`` into
-    ``${ACTION_PATH}/node_modules/.bin``. This helper returns the absolute path
-    to the requested binary so the analyzer can invoke the exact pinned version
-    regardless of the current working directory or global PATH.
+    which installs ``pprof-to-md`` into ``${ACTION_PATH}/node_modules/.bin``.
+    This helper returns the absolute path to the requested binary so the analyzer
+    can invoke the exact pinned version regardless of the current working directory
+    or global PATH.
 
     Using the local binary (instead of ``npx --yes <pkg>``) avoids a network
     re-resolve at runtime and guarantees the version pinned in
@@ -353,6 +352,78 @@ def convert_pprof_to_markdown(pprof_path: Path, action_path: Path) -> str:
         raise AnalyzerError("1b", "pprof-to-md produced empty output.")
     print(f"[1b] pprof-to-md produced {len(markdown)} chars of markdown.")
     return markdown
+
+
+def list_repo_files(repo: git.Repo | None = None) -> str:
+    """Generate a simple list of Go files in the repository.
+
+    Returns a markdown list of .go files for the LLM to choose from.
+    Uses git ls-files if possible, otherwise walks the filesystem.
+    """
+    files = []
+    try:
+        if repo is None:
+            repo = git.Repo(os.getcwd())
+        # Get tracked Go files from git
+        for item in repo.git.ls_files().split('\n'):
+            if item.endswith('.go'):
+                files.append(item)
+    except Exception:
+        # Fallback: walk filesystem
+        for root, dirs, filenames in os.walk('.'):
+            # Skip common non-source directories
+            dirs[:] = [d for d in dirs if d not in {'.git', 'vendor', 'node_modules', '.github', 'build', 'dist'}]
+            for f in filenames:
+                if f.endswith('.go'):
+                    path = os.path.join(root, f).lstrip('./')
+                    files.append(path)
+
+    files.sort()
+    return "\n".join(f"- `{f}`" for f in files)
+
+
+def read_file_context(file_path: str, line_range: tuple[int, int] | None = None, repo: git.Repo | None = None) -> str:
+    """Read a file (or line range) from the repository, returning lines with context.
+
+    Args:
+        file_path: Path to the file (repository-relative, e.g. 'main.go' or 'pkg/utils.go')
+        line_range: Tuple of (start_line, end_line) (1-indexed, inclusive). If None, returns entire file.
+        repo: Git repo object. If None, creates one from current directory.
+
+    Returns:
+        The file content with line numbers prepended, or an error message if file not found.
+    """
+    try:
+        if repo is None:
+            repo = git.Repo(os.getcwd())
+
+        try:
+            content = repo.git.show(f"HEAD:{file_path}")
+        except git.GitCommandError:
+            # Fall back to filesystem if git doesn't have it
+            if not os.path.exists(file_path):
+                return f"ERROR: File not found: {file_path}"
+            with open(file_path, 'r') as f:
+                content = f.read()
+
+        lines = content.split('\n')
+
+        if line_range:
+            start, end = line_range
+            start = max(1, start - 3)  # Include 3 lines of context before
+            end = min(len(lines), end + 3)  # Include 3 lines of context after
+            lines = lines[start - 1:end]
+            start_line = start
+        else:
+            start_line = 1
+
+        result = []
+        for i, line in enumerate(lines, start=start_line):
+            result.append(f"{i:4d}: {line}")
+
+        return "\n".join(result)
+    except Exception as e:
+        return f"ERROR: Failed to read {file_path}: {e}"
 
 
 
@@ -470,57 +541,22 @@ def prepare_git_checkout(tags: str) -> git.Repo:
 
 
 # ---------------------------------------------------------------------------
-# Step 1d — Run repomix
-# ---------------------------------------------------------------------------
-
-def run_repomix(action_path: Path) -> str:
-    """Run `repomix` to produce an XML representation of the repo.
-
-    Uses the locally-installed (pinned) binary from ``${ACTION_PATH}/node_modules/.bin``
-    rather than ``npx --yes repomix``. This avoids a network re-resolve at
-    runtime and guarantees the version pinned in ``package-lock.json`` runs.
-    """
-    Config.REPOMIX_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_file = Config.REPOMIX_OUTPUT_DIR / "repomix.xml"
-
-    cmd = [
-        _node_bin("repomix", action_path),
-        "--style", "xml",
-        "--token-count-tree",  "--output-show-line-numbers", 
-        "--output", str(out_file),
-    ]
-    print(f"[1d] Running: {' '.join(cmd)}")
-    _run_command(cmd, "1d", timeout=Config.REPOMIX_TIMEOUT_SECONDS, error_prefix="repomix")
-
-    if not out_file.exists():
-        raise AnalyzerError("1d", f"repomix output not found at {out_file}")
-
-    content = out_file.read_text(encoding="utf-8")
-    print(f"[1d] repomix produced {len(content)} chars.")
-    return content
-
-
-# ---------------------------------------------------------------------------
 # Step 1e — Construct prompt
 # ---------------------------------------------------------------------------
 
-def construct_prompt(template_path: Path, reference: str, analyzer_result: str, repomix: str) -> str:
-    # Extract hotspot files and filter repomix to reduce token count
-    hotspot_files = extract_hotspot_files(analyzer_result)
-    repomix_filtered = filter_repomix_by_files(repomix, hotspot_files, analyzer_result)
-
+def construct_prompt(template_path: Path, reference: str, analyzer_result: str, file_list: str) -> str:
     template = template_path.read_text(encoding="utf-8")
     prompt = template.format(
         reference_level=reference,
         analyzer_result=analyzer_result,
-        repomix_result=repomix_filtered,
+        file_list=file_list,
     )
     print(f"[1e] Prompt constructed ({len(prompt)} chars).")
     return prompt
 
 
 # ---------------------------------------------------------------------------
-# Token counting & chunking (for handling large repomix outputs)
+# Token counting (for monitoring prompt size)
 # ---------------------------------------------------------------------------
 
 def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
@@ -536,243 +572,139 @@ def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
     return len(enc.encode(text))
 
 
-def chunk_text(text: str, max_tokens: int = 50_000, model: str = "gpt-4o-mini") -> list[str]:
-    """Split text into chunks of at most max_tokens tokens, preserving line boundaries.
-
-    Falls back to cl100k_base encoding if the model is not recognized by tiktoken.
-    """
-    try:
-        enc = tiktoken.encoding_for_model(model)
-    except KeyError:
-        enc = tiktoken.get_encoding("cl100k_base")
-    lines = text.splitlines(keepends=True)
-
-    chunks = []
-    current_lines: list[str] = []
-    current_tokens = 0
-
-    for line in lines:
-        line_tokens = len(enc.encode(line))
-
-        # If a single line is bigger than the whole limit, hard-split it.
-        if line_tokens > max_tokens:
-            if current_lines:
-                chunks.append("".join(current_lines))
-                current_lines, current_tokens = [], 0
-            tokens = enc.encode(line)
-            for i in range(0, len(tokens), max_tokens):
-                chunks.append(enc.decode(tokens[i:i + max_tokens]))
-            continue
-
-        if current_tokens + line_tokens > max_tokens:
-            chunks.append("".join(current_lines))
-            current_lines, current_tokens = [], 0
-
-        current_lines.append(line)
-        current_tokens += line_tokens
-
-    if current_lines:
-        chunks.append("".join(current_lines))
-
-    return chunks
-
-
-def extract_hotspot_files(analyzer_result: str) -> set[str]:
-    """Extract file basenames from the analyzer result's call stacks, prioritizing
-    the Call Tree section which shows the actual call path to hotspots.
-
-    Parses the markdown output to find files mentioned in call stacks, with special
-    attention to the "Call Tree" section which traces from root to hotspot.
-    Returns a set of file basenames (e.g., {'main.go', 'utils.go'}).
-    """
-    files = set()
-
-    # First, extract from the Call Tree section (most relevant for correlation)
-    call_tree_start = analyzer_result.find("## Call Tree")
-    if call_tree_start != -1:
-        call_tree_end = analyzer_result.find("## Function Details", call_tree_start)
-        if call_tree_end == -1:
-            call_tree_end = analyzer_result.find("## Hotspot Analysis", call_tree_start)
-        if call_tree_end == -1:
-            call_tree_end = len(analyzer_result)
-
-        call_tree_section = analyzer_result[call_tree_start:call_tree_end]
-        # Extract file paths from the tree structure (e.g., "testing.go:1695", "_testmain.go:149")
-        # Pattern: function @ /path/file.go:line or file.go:line
-        call_tree_files = re.findall(r'@\s+(?:/[^:]*)?([^\s:/]+\.go)(?::\d+)?', call_tree_section)
-        files.update(Path(f).name for f in call_tree_files)
-
-    # Also scan other sections as fallback
-    patterns = [
-        r'(\w+\.go)(?::\d+)?',  # Go files with optional line numbers
-        r'File: ([^\s]+)',  # Explicit "File: " markers
-        r'`([^\s:]+\.go)(?::\d+)?`',  # Backtick-quoted file paths
-    ]
-
-    for pattern in patterns:
-        matches = re.findall(pattern, analyzer_result)
-        for match in matches:
-            basename = Path(match).name
-            if basename.endswith('.go'):
-                files.add(basename)
-
-    return files
-
-
-def filter_repomix_by_files(repomix_xml: str, hotspot_files: set[str], analyzer_result: str) -> str:
-    """Filter repomix XML to only include files mentioned in hotspot analysis + context files.
-
-    Keeps:
-    - Files whose basenames are in hotspot_files (application code that shows up in profiles)
-    - README, go.mod, go.sum, and other foundational files for context
-    - All .go test files (for LLM understanding of code intent)
-
-    If no hotspot files are found in the repomix (all hotspots are stdlib/runtime),
-    falls back to keeping core application files + all test files.
-
-    This reduces token count while preserving enough context for the LLM to correlate
-    hotspots with source code.
-    """
-    if not hotspot_files:
-        # If we couldn't extract files, return the full repomix (better to have too much context)
-        print("[1e] No hotspot files found; using full repomix context.")
-        return repomix_xml
-
-    # Files to always keep for context
-    always_keep = {'README.md', 'README.txt', 'go.mod', 'go.sum', 'Makefile', 'main.go'}
-
-    # Extract all file paths from repomix to check which hotspot files actually exist
-    files_in_repomix = set(Path(m).name for m in re.findall(r'<file path="([^"]+)"', repomix_xml))
-    hotspots_found_in_repo = hotspot_files & files_in_repomix
-
-    # If NO hotspot files are found in the repomix (all hotspots are stdlib/runtime),
-    # fall back to a balanced strategy: keep common entry point files + config
-    if not hotspots_found_in_repo:
-        print(f"[1e] Hotspots are in stdlib/runtime; keeping application entry points and config.")
-        # Common patterns for application entry points (main, handlers, servers, etc.)
-        # Keep these basenames + config files
-        common_entry_points = {'main.go', 'server.go', 'handler.go', 'app.go', '_testmain.go'}
-        always_keep.update(common_entry_points)
-
-        lines = repomix_xml.splitlines(keepends=True)
-        filtered_lines = []
-        skip_until_end_tag = False
-        keep_until_end_tag = False
-
-        for line in lines:
-            if '<file path="' in line:
-                path_match = re.search(r'path="([^"]+)"', line)
-                if path_match:
-                    path = path_match.group(1)
-                    basename = Path(path).name
-                    keep_file = basename in always_keep
-                else:
-                    keep_file = False
-
-                filtered_lines.append(line)
-                # If self-closing tag (/>), we're done with this file
-                if '/>' not in line:
-                    if keep_file:
-                        keep_until_end_tag = True
-                    else:
-                        skip_until_end_tag = True
-                continue
-
-            if skip_until_end_tag:
-                if '</file>' in line:
-                    skip_until_end_tag = False
-                continue
-
-            if keep_until_end_tag:
-                # We're keeping this file; append all lines until closing tag
-                filtered_lines.append(line)
-                if '</file>' in line:
-                    keep_until_end_tag = False
-                continue
-
-            if any(tag in line for tag in ['<?xml', '<directory', '</directory>', '<files>', '</files>',
-                                           '<summary', '<!--', 'token-count', '<root']):
-                filtered_lines.append(line)
-
-        filtered_xml = "".join(filtered_lines)
-    else:
-        # Standard path: filter to hotspot files + always-keep files
-        files_to_keep = hotspots_found_in_repo | always_keep
-        lines = repomix_xml.splitlines(keepends=True)
-        filtered_lines = []
-        skip_until_end_tag = False
-        keep_until_end_tag = False
-
-        for line in lines:
-            if '<file path="' in line:
-                path_match = re.search(r'path="([^"]+)"', line)
-                if path_match:
-                    path = path_match.group(1)
-                    basename = Path(path).name
-                    keep_file = basename in files_to_keep
-                else:
-                    keep_file = False
-
-                filtered_lines.append(line)
-                # If self-closing tag (/>), we're done with this file
-                if '/>' not in line:
-                    if keep_file:
-                        keep_until_end_tag = True
-                    else:
-                        skip_until_end_tag = True
-                continue
-
-            if skip_until_end_tag:
-                if '</file>' in line:
-                    skip_until_end_tag = False
-                continue
-
-            if keep_until_end_tag:
-                # We're keeping this file; append all lines until closing tag
-                filtered_lines.append(line)
-                if '</file>' in line:
-                    keep_until_end_tag = False
-                continue
-
-            if any(tag in line for tag in ['<?xml', '<directory', '</directory>', '<files>', '</files>',
-                                           '<summary', '<!--', 'token-count', '<root']):
-                filtered_lines.append(line)
-
-        filtered_xml = "".join(filtered_lines)
-
-    original_size = len(repomix_xml)
-    filtered_size = len(filtered_xml)
-    reduction = 100 * (1 - filtered_size / original_size) if original_size > 0 else 0
-    print(f"[1e] Filtered repomix: {original_size} → {filtered_size} chars ({reduction:.1f}% reduction).")
-    return filtered_xml
 
 
 # ---------------------------------------------------------------------------
 # Step 1f — Feed to LLM
 # ---------------------------------------------------------------------------
 
-def call_llm(messages: list[dict], config: EnvConfig) -> str:
-    """Call the OpenAI-compatible endpoint with the given conversation and
-    return the raw text response."""
+def call_llm(messages: list[dict], config: EnvConfig, tools: list[dict] | None = None, repo: git.Repo | None = None) -> tuple[str, list[dict]]:
+    """Call the OpenAI-compatible endpoint with the given conversation.
+
+    If tools are provided, enables tool-use and handles tool calls in a loop.
+    Returns (final_text_response, all_messages_for_context).
+    """
     client = OpenAI(
         api_key=config.ai_key,
         base_url=config.ai_endpoint,
         timeout=300,
     )
     print(f"[1f] Calling LLM (model={config.ai_model})...")
-    completion = client.chat.completions.create(
-        model=config.ai_model,
-        messages=messages,
-        temperature=0.2,
-    )
-    text = completion.choices[0].message.content or ""
-    print(f"[1f] LLM returned {len(text)} chars.")
-    return text
+
+    tool_calls_made = 0
+    max_tool_calls = 10
+
+    while True:
+        completion = client.chat.completions.create(
+            model=config.ai_model,
+            messages=messages,
+            temperature=0.2,
+            tools=tools if tools else None,
+        )
+
+        assistant_message = completion.choices[0].message
+        text = assistant_message.content or ""
+
+        # If no tools, return the text response
+        if not tools or not assistant_message.tool_calls:
+            print(f"[1f] LLM returned {len(text)} chars.")
+            return text, messages
+
+        # Handle tool calls
+        tool_calls = assistant_message.tool_calls
+        print(f"[1f] LLM made {len(tool_calls)} tool call(s).")
+
+        # Add the assistant's response (with tool calls) to the conversation
+        messages.append({"role": "assistant", "content": text, "tool_calls": [
+            {"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+            for tc in tool_calls
+        ]})
+
+        # Process each tool call
+        for tool_call in tool_calls:
+            tool_name = tool_call.function.name
+            tool_input = tool_call.function.arguments
+
+            if tool_name == "read_file":
+                result = _execute_read_file_tool(tool_input, repo)
+            else:
+                result = f"ERROR: Unknown tool {tool_name}"
+
+            # Add tool result to the conversation
+            messages.append({
+                "role": "user",
+                "content": f"Tool result for {tool_name}: {result}",
+                "tool_call_id": tool_call.id,
+            })
+
+        tool_calls_made += len(tool_calls)
+        if tool_calls_made > max_tool_calls:
+            raise AnalyzerError("1f", f"Tool calls exceeded limit ({max_tool_calls}). LLM may be in an infinite loop.")
+
+
+def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> str:
+    """Execute the read_file tool request.
+
+    tool_input can be:
+    - "main.go" — read entire file
+    - "main.go:100-150" — read lines 100-150
+    - "utils.go:search_user" — read function (approximate by searching)
+    """
+    import json
+
+    try:
+        if isinstance(tool_input, str):
+            params = json.loads(tool_input)
+        else:
+            params = tool_input
+
+        file_path = params.get("file_path", params.get("path", ""))
+        line_range = params.get("line_range")
+
+        if not file_path:
+            return "ERROR: No file_path provided"
+
+        # Parse line_range if provided as string "100-150"
+        if isinstance(line_range, str) and '-' in line_range:
+            try:
+                start, end = line_range.split('-')
+                line_range = (int(start.strip()), int(end.strip()))
+            except ValueError:
+                line_range = None
+
+        return read_file_context(file_path, line_range, repo)
+    except Exception as e:
+        return f"ERROR: Failed to read file: {e}"
 
 
 # ---------------------------------------------------------------------------
 # Step 1g — Extract git patch from LLM result
 # ---------------------------------------------------------------------------
+
+def create_read_file_tool() -> dict:
+    """Create the read_file tool definition for the LLM."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read a file or line range from the repository. Use this to examine code before writing patches.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Repository-relative path to the file (e.g., 'main.go' or 'pkg/utils.go')",
+                    },
+                    "line_range": {
+                        "type": "string",
+                        "description": "Optional line range in format 'start-end' (e.g., '100-150'). If omitted, reads entire file.",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        },
+    }
+
 
 def extract_patch(llm_result: str) -> tuple[str, str]:
     """Extract the SUMMARY section and the diff patch from the LLM result.
@@ -821,122 +753,28 @@ def _git_apply_check(patch: str) -> str | None:
     return None
 
 
-def _generate_patch_from_chunks(
-    preamble: str, repomix_chunks: list[str], postamble: str, config: EnvConfig
-) -> tuple[str, str, str]:
-    """Analyze each chunk of repomix separately, then synthesize into a single patch.
+def generate_valid_patch(prompt: str, config: EnvConfig, repo: git.Repo | None = None) -> tuple[str, str, str]:
+    """Call the LLM with tool-use enabled to generate a patch via agent loop.
 
-    Returns (summary, patch, llm_result) if a valid patch is produced, or raises AnalyzerError.
-    """
-    print(f"[1f] Analyzing {len(repomix_chunks)} repomix chunks...")
-    chunk_results = []
+    The LLM can use the read_file tool to request specific files/line ranges
+    as needed. Once it has enough context, it produces a SUMMARY/PATCH response.
 
-    for i, chunk in enumerate(repomix_chunks, 1):
-        print(f"[1f] Analyzing chunk {i}/{len(repomix_chunks)}...")
-        chunk_prompt = (
-            f"{preamble}\n\n## Repository Context (XML) [Chunk {i}/{len(repomix_chunks)}]\n\n"
-            f"{chunk}\n\n{postamble}"
-        )
-        messages = [
-            {"role": "system", "content": "You are a performance engineering assistant that produces git patches."},
-            {"role": "user", "content": f"{chunk_prompt}\n\n"
-                                         f"Focus ONLY on optimizations relevant to the code visible in this chunk. "
-                                         f"Respond in SUMMARY/PATCH format."},
-        ]
-        chunk_result = call_llm(messages, config)
-        chunk_results.append(chunk_result)
-
-    # Final synthesis: combine chunk analyses into a single patch
-    print(f"[1f] Synthesizing {len(chunk_results)} chunk analyses into final patch...")
-    combined_analyses = "\n\n---\n\n".join(
-        f"[Chunk {i+1} analysis]\n{r}" for i, r in enumerate(chunk_results)
-    )
-    synthesis_prompt = (
-        f"{preamble}\n\n## Synthesis of Chunk Analyses\n\n"
-        f"Below are performance analyses from multiple chunks of the same repository. "
-        f"Combine them into a single coherent patch that addresses all identified hotspots, "
-        f"removing redundancy and conflicts. Prioritize high-impact fixes and ensure the final patch is cohesive.\n\n"
-        f"{combined_analyses}\n\n{postamble}"
-    )
-    synthesis_messages = [
-        {"role": "system", "content": "You are a performance engineering assistant that produces git patches."},
-        {"role": "user", "content": synthesis_prompt},
-    ]
-    final_llm_result = call_llm(synthesis_messages, config)
-    _write_artifact("llm_result_attempt1.txt", final_llm_result)
-
-    try:
-        summary, patch = extract_patch(final_llm_result)
-    except AnalyzerError as exc:
-        raise AnalyzerError("1g", f"Chunked analysis: {exc.message}")
-
-    check_error = _git_apply_check(patch)
-    if check_error is None:
-        print(f"[1g] Chunked analysis: patch applies cleanly.")
-        return summary, patch, final_llm_result
-
-    raise AnalyzerError(
-        "1h",
-        f"Chunked analysis produced a patch that failed `git apply --check`: {check_error}"
-    )
-
-
-def _split_prompt_for_chunking(prompt: str) -> tuple[str, str, str] | None:
-    """Try to split a prompt into (preamble, repomix, postamble) if it contains
-    the repomix block. Returns None if repomix block is not found."""
-    repomix_start = prompt.find("## Repository Context (XML)")
-    if repomix_start == -1:
-        return None
-
-    preamble = prompt[:repomix_start]
-    rest = prompt[repomix_start:]
-
-    # Find the end of the XML block (before the next ## section)
-    your_task_start = rest.find("## Your Task")
-    if your_task_start == -1:
-        # No clear end marker, repomix extends to end
-        return (preamble, rest, "")
-
-    repomix_block = rest[:your_task_start]
-    postamble = rest[your_task_start:]
-    return (preamble, repomix_block, postamble)
-
-
-def generate_valid_patch(prompt: str, config: EnvConfig) -> tuple[str, str, str]:
-    """Call the LLM and extract a SUMMARY/PATCH, verifying the patch applies.
-
-    If extraction fails or the patch fails a `git apply --check` dry-run, the
-    error is fed back to the LLM as a follow-up message asking for a
-    corrected response, up to ``Config.MAX_PATCH_ATTEMPTS`` total generations.
-
-    If the prompt is too large for a single LLM call, chunks the repomix content
-    and analyzes each chunk separately, then synthesizes the results.
+    If extraction fails or the patch fails `git apply --check`, the error is
+    fed back to the LLM for correction, up to ``Config.MAX_PATCH_ATTEMPTS`` times.
 
     Returns (summary, patch, llm_result) from the first attempt whose patch
-    checks out cleanly. Raises AnalyzerError("1h") if no attempt does.
+    checks out cleanly. Raises AnalyzerError("1h") if no attempt succeeds.
     """
-    # Check if the prompt is too large; if so, use chunked analysis
-    token_count = count_tokens(prompt, config.ai_model)
-    max_prompt_tokens = 100_000  # Conservative limit; gpt-4o-mini context is 128k
-
-    if token_count > max_prompt_tokens:
-        print(f"[1f] Prompt is {token_count} tokens (exceeds {max_prompt_tokens}); using chunked analysis.")
-        split_result = _split_prompt_for_chunking(prompt)
-        if split_result is not None:
-            preamble, repomix_block, postamble = split_result
-            chunks = chunk_text(repomix_block, max_tokens=40_000, model=config.ai_model)
-            print(f"[1f] Split repomix into {len(chunks)} chunks for analysis.")
-            return _generate_patch_from_chunks(preamble, chunks, postamble, config)
-
-    # Standard single-call path
     messages = [
-        {"role": "system", "content": "You are a performance engineering assistant that produces git patches."},
+        {"role": "system", "content": "You are a performance engineering assistant that produces git patches. Use the read_file tool to examine code when needed, then produce a SUMMARY and PATCH."},
         {"role": "user", "content": prompt},
     ]
 
+    tool_definition = create_read_file_tool()
     last_error = "unknown error"
+
     for attempt in range(1, Config.MAX_PATCH_ATTEMPTS + 1):
-        llm_result = call_llm(messages, config)
+        llm_result, final_messages = call_llm(messages, config, tools=[tool_definition], repo=repo)
         _write_artifact(f"llm_result_attempt{attempt}.txt", llm_result)
 
         try:
@@ -953,16 +791,14 @@ def generate_valid_patch(prompt: str, config: EnvConfig) -> tuple[str, str, str]
             print(f"[1g] Attempt {attempt}/{Config.MAX_PATCH_ATTEMPTS}: {last_error}")
 
         if attempt < Config.MAX_PATCH_ATTEMPTS:
-            messages.append({"role": "assistant", "content": llm_result})
+            messages = final_messages
             messages.append({
                 "role": "user",
                 "content": (
                     "Your previous response could not be turned into an applied git patch:\n\n"
                     f"{last_error}\n\n"
                     "Reply again in the exact same SUMMARY/PATCH format described earlier, "
-                    "fixing the issue — check that there is exactly one ```diff fence, and that "
-                    "file paths and hunk `@@ -a,b +c,d @@` line counts match the repository "
-                    "content given earlier."
+                    "fixing the issue. Use the read_file tool again if needed to verify line numbers."
                 ),
             })
 
@@ -1171,19 +1007,18 @@ def main() -> int:
         repo = prepare_git_checkout(config.tags)
         _record_step("1c", "ok")
 
-        # 1d — run repomix
-        repomix = run_repomix(config.action_path)
-        _write_artifact("repomix_result.xml", repomix)
+        # 1d — skip repomix; we'll use agent loop file access instead
+        print("[1d] Skipping repomix; using agent loop with on-demand file access.")
         _record_step("1d", "ok")
 
-        # 1e — construct prompt
-        prompt = construct_prompt(prompt_template, config.reference, analyzer_result, repomix)
+        # 1e — construct prompt with file list
+        file_list = list_repo_files(repo)
+        prompt = construct_prompt(prompt_template, config.reference, analyzer_result, file_list)
         _write_artifact("prompt.txt", prompt)
         _record_step("1e", "ok")
 
-        # 1f/1g — feed to LLM and extract a patch, retrying once (with the
-        # `git apply --check` error fed back) if it doesn't apply cleanly.
-        summary, patch, llm_result = generate_valid_patch(prompt, config)
+        # 1f/1g — feed to LLM with tool-use enabled for file access, extract patch
+        summary, patch, llm_result = generate_valid_patch(prompt, config, repo=repo)
         _write_artifact("llm_result.txt", llm_result)
         _write_artifact("patch.diff", patch + "\n")
         _record_step("1f", "ok")

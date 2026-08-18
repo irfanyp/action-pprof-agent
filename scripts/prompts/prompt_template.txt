@@ -24,13 +24,11 @@ The following markdown was produced by converting the raw pprof profile with `pp
 ```
 
 
-## Repository Context (XML)
+## Repository Files
 
-The following is the repository content in an LLM-compatible XML format, produced by repomix:
+The following is a list of Go source files in the repository. When you need to see the actual code for a file (or a specific line range), use the `read_file` tool to request it:
 
-```xml
-{repomix_result}
-```
+{file_list}
 
 ## Your Task
 
@@ -80,7 +78,7 @@ Do not include any introductory or concluding conversational text outside the ##
 A single unified-diff patch wrapped in one ```diff code fence — the only code fence in your entire response. If multiple files change, include all of their hunks inside this one fence; do not split the patch across multiple fences.
 
 The patch must be applicable with `git apply` from the repository root:
-- File paths in the `--- a/...` / `+++ b/...` headers must exactly match the paths shown in the repository XML above.
+- File paths in the `--- a/...` / `+++ b/...` headers must exactly match the repo-relative paths.
 - Each hunk's `@@ -a,b +c,d @@` header line counts must accurately reflect the number of context/removed/added lines that follow.
 - For new files, use `--- /dev/null` as the source path.
 - Only include files that need to change.
@@ -96,3 +94,15 @@ Example:
 +new line
  context line
 ```
+
+## Using the `read_file` Tool
+
+When you need to see the actual code for a file or function:
+1. Use the `read_file` tool with a request like:
+   - `read_file: main.go` — to read the entire file
+   - `read_file: main.go:100-150` — to read lines 100-150 with surrounding context
+   - `read_file: utils.go:search_user` — to read around the `search_user` function
+2. The tool will return the file with line numbers. Use those line numbers when constructing your patch.
+3. Keep using the tool until you have enough context to write an accurate patch.
+
+Do NOT invent line numbers or file paths. Only write a patch for files you have actually read with `read_file`.

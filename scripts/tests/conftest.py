@@ -218,12 +218,12 @@ Fixed the issue.
 @pytest.fixture
 def sample_prompt_template() -> str:
     """A minimal prompt template with the expected {reference_level}, {analyzer_result},
-    {repomix_result} placeholders.
+    and {file_list} placeholders.
 
     Used by construct_prompt() tests to verify template substitution.
     """
     return (
         "Reference: {reference_level}\n"
         "Analyzer:\n{analyzer_result}\n"
-        "Repo:\n{repomix_result}\n"
+        "Repo:\n{file_list}\n"
     )
