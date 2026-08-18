@@ -444,7 +444,8 @@ def read_file_context(file_path: str, line_range: tuple[int, int] | None = None,
 
         result = []
         for i, line in enumerate(lines, start=start_line):
-            result.append(f"{i:4d}: {line}")
+            # Format: "L{line_num}| {content}" to make it clearer for LLM to parse
+            result.append(f"L{i}| {line}")
 
         return "\n".join(result)
     except Exception as e:
