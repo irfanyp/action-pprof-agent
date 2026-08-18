@@ -104,12 +104,29 @@ When you need to see the actual code for a file or function:
    - `read_file: main.go` — to read the entire file
    - `read_file: main.go:100-150` — to read lines 100-150 with surrounding context
    - `read_file: utils.go:search_user` — to read around the `search_user` function
-2. The tool will return the file with line numbers. Use those line numbers when constructing your patch.
+2. The tool will return the file with line numbers in format: `L{line_num}| {actual_content}`. **Only the content after the `|` is part of the actual file.** The `L{line_num}|` prefix is metadata.
 3. Keep using the tool until you have enough context to write an accurate patch.
 
 **⚠️ Critical for patch generation:** When writing the patch:
-- **Preserve indentation exactly** — if the file uses tabs, use tabs in your patch. If it uses spaces, use spaces. Do not mix or convert between them.
-- Match the **exact number of leading tabs/spaces** for each line in the context and added lines.
-- Ensure the `@@ -a,b +c,d @@` hunk headers have correct line counts: count all context lines (with space prefix) + added lines (with + prefix) + deleted lines (with - prefix).
+- **Extract only the content after `|`** — Ignore the `L{line_num}|` prefix; that's not part of the file.
+- **Preserve indentation exactly** — Copy the exact whitespace from what you read. If it uses tabs, use tabs in your patch. If spaces, use spaces. Do not convert or mix.
+- **Match context exactly** — The context lines in your patch must be byte-for-byte identical to what you read, minus the `L{line_num}|` prefix.
+- **Ensure hunk headers are correct:** `@@ -a,b +c,d @@` where count = all context lines + removed lines + added lines.
+
+**Example:** If you read:
+```
+L58| // ContainsNet returns true iff this IPSet contains all IPs in the given network
+L59| func (s *IPSet) ContainsNet(net *net.IPNet) bool {
+L60| 	if s == nil || net == nil {
+```
+
+Your patch context should be:
+```
+ // ContainsNet returns true iff this IPSet contains all IPs in the given network
+ func (s *IPSet) ContainsNet(net *net.IPNet) bool {
+ 	if s == nil || net == nil {
+```
+
+(Space prefix + exact content from after the `|`, preserving the tabs.)
 
 Do NOT invent line numbers or file paths. Only write a patch for files you have actually read with `read_file`.
