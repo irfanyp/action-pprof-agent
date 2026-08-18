@@ -657,6 +657,7 @@ def filter_repomix_by_files(repomix_xml: str, hotspot_files: set[str], analyzer_
         lines = repomix_xml.splitlines(keepends=True)
         filtered_lines = []
         skip_until_end_tag = False
+        keep_until_end_tag = False
 
         for line in lines:
             if '<file path="' in line:
@@ -664,17 +665,29 @@ def filter_repomix_by_files(repomix_xml: str, hotspot_files: set[str], analyzer_
                 if path_match:
                     path = path_match.group(1)
                     basename = Path(path).name
-                    # Keep if basename matches our set
-                    if basename in always_keep:
-                        filtered_lines.append(line)
-                        continue
+                    keep_file = basename in always_keep
+                else:
+                    keep_file = False
+
+                filtered_lines.append(line)
+                # If self-closing tag (/>), we're done with this file
                 if '/>' not in line:
-                    skip_until_end_tag = True
+                    if keep_file:
+                        keep_until_end_tag = True
+                    else:
+                        skip_until_end_tag = True
                 continue
 
             if skip_until_end_tag:
-                if '</file>' in line or '/>' in line:
+                if '</file>' in line:
                     skip_until_end_tag = False
+                continue
+
+            if keep_until_end_tag:
+                # We're keeping this file; append all lines until closing tag
+                filtered_lines.append(line)
+                if '</file>' in line:
+                    keep_until_end_tag = False
                 continue
 
             if any(tag in line for tag in ['<?xml', '<directory', '</directory>', '<files>', '</files>',
@@ -688,6 +701,7 @@ def filter_repomix_by_files(repomix_xml: str, hotspot_files: set[str], analyzer_
         lines = repomix_xml.splitlines(keepends=True)
         filtered_lines = []
         skip_until_end_tag = False
+        keep_until_end_tag = False
 
         for line in lines:
             if '<file path="' in line:
@@ -695,16 +709,29 @@ def filter_repomix_by_files(repomix_xml: str, hotspot_files: set[str], analyzer_
                 if path_match:
                     path = path_match.group(1)
                     basename = Path(path).name
-                    if basename in files_to_keep:
-                        filtered_lines.append(line)
-                        continue
+                    keep_file = basename in files_to_keep
+                else:
+                    keep_file = False
+
+                filtered_lines.append(line)
+                # If self-closing tag (/>), we're done with this file
                 if '/>' not in line:
-                    skip_until_end_tag = True
+                    if keep_file:
+                        keep_until_end_tag = True
+                    else:
+                        skip_until_end_tag = True
                 continue
 
             if skip_until_end_tag:
-                if '</file>' in line or '/>' in line:
+                if '</file>' in line:
                     skip_until_end_tag = False
+                continue
+
+            if keep_until_end_tag:
+                # We're keeping this file; append all lines until closing tag
+                filtered_lines.append(line)
+                if '</file>' in line:
+                    keep_until_end_tag = False
                 continue
 
             if any(tag in line for tag in ['<?xml', '<directory', '</directory>', '<files>', '</files>',
