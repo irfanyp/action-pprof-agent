@@ -32,6 +32,7 @@ from pathlib import Path
 
 import git
 import requests
+import tiktoken
 from openai import OpenAI
 
 # ---------------------------------------------------------------------------
@@ -504,15 +505,219 @@ def run_repomix(action_path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def construct_prompt(template_path: Path, reference: str, analyzer_result: str, repomix: str) -> str:
+    # Extract hotspot files and filter repomix to reduce token count
+    hotspot_files = extract_hotspot_files(analyzer_result)
+    repomix_filtered = filter_repomix_by_files(repomix, hotspot_files, analyzer_result)
+
     template = template_path.read_text(encoding="utf-8")
     prompt = template.format(
         reference_level=reference,
         analyzer_result=analyzer_result,
-        repomix_result=repomix,
+        repomix_result=repomix_filtered,
     )
     print(f"[1e] Prompt constructed ({len(prompt)} chars).")
     return prompt
 
+
+# ---------------------------------------------------------------------------
+# Token counting & chunking (for handling large repomix outputs)
+# ---------------------------------------------------------------------------
+
+def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
+    """Count tokens in text using the specified model's encoding.
+
+    Falls back to cl100k_base encoding if the model is not recognized by tiktoken.
+    """
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        # Unknown model; use the default GPT encoding
+        enc = tiktoken.get_encoding("cl100k_base")
+    return len(enc.encode(text))
+
+
+def chunk_text(text: str, max_tokens: int = 50_000, model: str = "gpt-4o-mini") -> list[str]:
+    """Split text into chunks of at most max_tokens tokens, preserving line boundaries.
+
+    Falls back to cl100k_base encoding if the model is not recognized by tiktoken.
+    """
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        enc = tiktoken.get_encoding("cl100k_base")
+    lines = text.splitlines(keepends=True)
+
+    chunks = []
+    current_lines: list[str] = []
+    current_tokens = 0
+
+    for line in lines:
+        line_tokens = len(enc.encode(line))
+
+        # If a single line is bigger than the whole limit, hard-split it.
+        if line_tokens > max_tokens:
+            if current_lines:
+                chunks.append("".join(current_lines))
+                current_lines, current_tokens = [], 0
+            tokens = enc.encode(line)
+            for i in range(0, len(tokens), max_tokens):
+                chunks.append(enc.decode(tokens[i:i + max_tokens]))
+            continue
+
+        if current_tokens + line_tokens > max_tokens:
+            chunks.append("".join(current_lines))
+            current_lines, current_tokens = [], 0
+
+        current_lines.append(line)
+        current_tokens += line_tokens
+
+    if current_lines:
+        chunks.append("".join(current_lines))
+
+    return chunks
+
+
+def extract_hotspot_files(analyzer_result: str) -> set[str]:
+    """Extract file basenames from the analyzer result's call stacks, prioritizing
+    the Call Tree section which shows the actual call path to hotspots.
+
+    Parses the markdown output to find files mentioned in call stacks, with special
+    attention to the "Call Tree" section which traces from root to hotspot.
+    Returns a set of file basenames (e.g., {'main.go', 'utils.go'}).
+    """
+    files = set()
+
+    # First, extract from the Call Tree section (most relevant for correlation)
+    call_tree_start = analyzer_result.find("## Call Tree")
+    if call_tree_start != -1:
+        call_tree_end = analyzer_result.find("## Function Details", call_tree_start)
+        if call_tree_end == -1:
+            call_tree_end = analyzer_result.find("## Hotspot Analysis", call_tree_start)
+        if call_tree_end == -1:
+            call_tree_end = len(analyzer_result)
+
+        call_tree_section = analyzer_result[call_tree_start:call_tree_end]
+        # Extract file paths from the tree structure (e.g., "testing.go:1695", "_testmain.go:149")
+        # Pattern: function @ /path/file.go:line or file.go:line
+        call_tree_files = re.findall(r'@\s+(?:/[^:]*)?([^\s:/]+\.go)(?::\d+)?', call_tree_section)
+        files.update(Path(f).name for f in call_tree_files)
+
+    # Also scan other sections as fallback
+    patterns = [
+        r'(\w+\.go)(?::\d+)?',  # Go files with optional line numbers
+        r'File: ([^\s]+)',  # Explicit "File: " markers
+        r'`([^\s:]+\.go)(?::\d+)?`',  # Backtick-quoted file paths
+    ]
+
+    for pattern in patterns:
+        matches = re.findall(pattern, analyzer_result)
+        for match in matches:
+            basename = Path(match).name
+            if basename.endswith('.go'):
+                files.add(basename)
+
+    return files
+
+
+def filter_repomix_by_files(repomix_xml: str, hotspot_files: set[str], analyzer_result: str) -> str:
+    """Filter repomix XML to only include files mentioned in hotspot analysis + context files.
+
+    Keeps:
+    - Files whose basenames are in hotspot_files (application code that shows up in profiles)
+    - README, go.mod, go.sum, and other foundational files for context
+    - All .go test files (for LLM understanding of code intent)
+
+    If no hotspot files are found in the repomix (all hotspots are stdlib/runtime),
+    falls back to keeping core application files + all test files.
+
+    This reduces token count while preserving enough context for the LLM to correlate
+    hotspots with source code.
+    """
+    if not hotspot_files:
+        # If we couldn't extract files, return the full repomix (better to have too much context)
+        print("[1e] No hotspot files found; using full repomix context.")
+        return repomix_xml
+
+    # Files to always keep for context
+    always_keep = {'README.md', 'README.txt', 'go.mod', 'go.sum', 'Makefile', 'main.go'}
+
+    # Extract all file paths from repomix to check which hotspot files actually exist
+    files_in_repomix = set(Path(m).name for m in re.findall(r'<file path="([^"]+)"', repomix_xml))
+    hotspots_found_in_repo = hotspot_files & files_in_repomix
+
+    # If NO hotspot files are found in the repomix (all hotspots are stdlib/runtime),
+    # fall back to a balanced strategy: keep common entry point files + config
+    if not hotspots_found_in_repo:
+        print(f"[1e] Hotspots are in stdlib/runtime; keeping application entry points and config.")
+        # Common patterns for application entry points (main, handlers, servers, etc.)
+        # Keep these basenames + config files
+        common_entry_points = {'main.go', 'server.go', 'handler.go', 'app.go', '_testmain.go'}
+        always_keep.update(common_entry_points)
+
+        lines = repomix_xml.splitlines(keepends=True)
+        filtered_lines = []
+        skip_until_end_tag = False
+
+        for line in lines:
+            if '<file path="' in line:
+                path_match = re.search(r'path="([^"]+)"', line)
+                if path_match:
+                    path = path_match.group(1)
+                    basename = Path(path).name
+                    # Keep if basename matches our set
+                    if basename in always_keep:
+                        filtered_lines.append(line)
+                        continue
+                if '/>' not in line:
+                    skip_until_end_tag = True
+                continue
+
+            if skip_until_end_tag:
+                if '</file>' in line or '/>' in line:
+                    skip_until_end_tag = False
+                continue
+
+            if any(tag in line for tag in ['<?xml', '<directory', '</directory>', '<files>', '</files>',
+                                           '<summary', '<!--', 'token-count', '<root']):
+                filtered_lines.append(line)
+
+        filtered_xml = "".join(filtered_lines)
+    else:
+        # Standard path: filter to hotspot files + always-keep files
+        files_to_keep = hotspots_found_in_repo | always_keep
+        lines = repomix_xml.splitlines(keepends=True)
+        filtered_lines = []
+        skip_until_end_tag = False
+
+        for line in lines:
+            if '<file path="' in line:
+                path_match = re.search(r'path="([^"]+)"', line)
+                if path_match:
+                    path = path_match.group(1)
+                    basename = Path(path).name
+                    if basename in files_to_keep:
+                        filtered_lines.append(line)
+                        continue
+                if '/>' not in line:
+                    skip_until_end_tag = True
+                continue
+
+            if skip_until_end_tag:
+                if '</file>' in line or '/>' in line:
+                    skip_until_end_tag = False
+                continue
+
+            if any(tag in line for tag in ['<?xml', '<directory', '</directory>', '<files>', '</files>',
+                                           '<summary', '<!--', 'token-count', '<root']):
+                filtered_lines.append(line)
+
+        filtered_xml = "".join(filtered_lines)
+
+    original_size = len(repomix_xml)
+    filtered_size = len(filtered_xml)
+    reduction = 100 * (1 - filtered_size / original_size) if original_size > 0 else 0
+    print(f"[1e] Filtered repomix: {original_size} → {filtered_size} chars ({reduction:.1f}% reduction).")
+    return filtered_xml
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +794,87 @@ def _git_apply_check(patch: str) -> str | None:
     return None
 
 
+def _generate_patch_from_chunks(
+    preamble: str, repomix_chunks: list[str], postamble: str, config: EnvConfig
+) -> tuple[str, str, str]:
+    """Analyze each chunk of repomix separately, then synthesize into a single patch.
+
+    Returns (summary, patch, llm_result) if a valid patch is produced, or raises AnalyzerError.
+    """
+    print(f"[1f] Analyzing {len(repomix_chunks)} repomix chunks...")
+    chunk_results = []
+
+    for i, chunk in enumerate(repomix_chunks, 1):
+        print(f"[1f] Analyzing chunk {i}/{len(repomix_chunks)}...")
+        chunk_prompt = (
+            f"{preamble}\n\n## Repository Context (XML) [Chunk {i}/{len(repomix_chunks)}]\n\n"
+            f"{chunk}\n\n{postamble}"
+        )
+        messages = [
+            {"role": "system", "content": "You are a performance engineering assistant that produces git patches."},
+            {"role": "user", "content": f"{chunk_prompt}\n\n"
+                                         f"Focus ONLY on optimizations relevant to the code visible in this chunk. "
+                                         f"Respond in SUMMARY/PATCH format."},
+        ]
+        chunk_result = call_llm(messages, config)
+        chunk_results.append(chunk_result)
+
+    # Final synthesis: combine chunk analyses into a single patch
+    print(f"[1f] Synthesizing {len(chunk_results)} chunk analyses into final patch...")
+    combined_analyses = "\n\n---\n\n".join(
+        f"[Chunk {i+1} analysis]\n{r}" for i, r in enumerate(chunk_results)
+    )
+    synthesis_prompt = (
+        f"{preamble}\n\n## Synthesis of Chunk Analyses\n\n"
+        f"Below are performance analyses from multiple chunks of the same repository. "
+        f"Combine them into a single coherent patch that addresses all identified hotspots, "
+        f"removing redundancy and conflicts. Prioritize high-impact fixes and ensure the final patch is cohesive.\n\n"
+        f"{combined_analyses}\n\n{postamble}"
+    )
+    synthesis_messages = [
+        {"role": "system", "content": "You are a performance engineering assistant that produces git patches."},
+        {"role": "user", "content": synthesis_prompt},
+    ]
+    final_llm_result = call_llm(synthesis_messages, config)
+    _write_artifact("llm_result_attempt1.txt", final_llm_result)
+
+    try:
+        summary, patch = extract_patch(final_llm_result)
+    except AnalyzerError as exc:
+        raise AnalyzerError("1g", f"Chunked analysis: {exc.message}")
+
+    check_error = _git_apply_check(patch)
+    if check_error is None:
+        print(f"[1g] Chunked analysis: patch applies cleanly.")
+        return summary, patch, final_llm_result
+
+    raise AnalyzerError(
+        "1h",
+        f"Chunked analysis produced a patch that failed `git apply --check`: {check_error}"
+    )
+
+
+def _split_prompt_for_chunking(prompt: str) -> tuple[str, str, str] | None:
+    """Try to split a prompt into (preamble, repomix, postamble) if it contains
+    the repomix block. Returns None if repomix block is not found."""
+    repomix_start = prompt.find("## Repository Context (XML)")
+    if repomix_start == -1:
+        return None
+
+    preamble = prompt[:repomix_start]
+    rest = prompt[repomix_start:]
+
+    # Find the end of the XML block (before the next ## section)
+    your_task_start = rest.find("## Your Task")
+    if your_task_start == -1:
+        # No clear end marker, repomix extends to end
+        return (preamble, rest, "")
+
+    repomix_block = rest[:your_task_start]
+    postamble = rest[your_task_start:]
+    return (preamble, repomix_block, postamble)
+
+
 def generate_valid_patch(prompt: str, config: EnvConfig) -> tuple[str, str, str]:
     """Call the LLM and extract a SUMMARY/PATCH, verifying the patch applies.
 
@@ -596,9 +882,26 @@ def generate_valid_patch(prompt: str, config: EnvConfig) -> tuple[str, str, str]
     error is fed back to the LLM as a follow-up message asking for a
     corrected response, up to ``Config.MAX_PATCH_ATTEMPTS`` total generations.
 
+    If the prompt is too large for a single LLM call, chunks the repomix content
+    and analyzes each chunk separately, then synthesizes the results.
+
     Returns (summary, patch, llm_result) from the first attempt whose patch
     checks out cleanly. Raises AnalyzerError("1h") if no attempt does.
     """
+    # Check if the prompt is too large; if so, use chunked analysis
+    token_count = count_tokens(prompt, config.ai_model)
+    max_prompt_tokens = 100_000  # Conservative limit; gpt-4o-mini context is 128k
+
+    if token_count > max_prompt_tokens:
+        print(f"[1f] Prompt is {token_count} tokens (exceeds {max_prompt_tokens}); using chunked analysis.")
+        split_result = _split_prompt_for_chunking(prompt)
+        if split_result is not None:
+            preamble, repomix_block, postamble = split_result
+            chunks = chunk_text(repomix_block, max_tokens=40_000, model=config.ai_model)
+            print(f"[1f] Split repomix into {len(chunks)} chunks for analysis.")
+            return _generate_patch_from_chunks(preamble, chunks, postamble, config)
+
+    # Standard single-call path
     messages = [
         {"role": "system", "content": "You are a performance engineering assistant that produces git patches."},
         {"role": "user", "content": prompt},
