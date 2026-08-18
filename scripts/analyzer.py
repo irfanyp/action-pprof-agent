@@ -422,7 +422,8 @@ def read_file_context(file_path: str, line_range: tuple[int, int] | None = None,
         if content is None:
             return f"ERROR: File not found: {file_path}"
 
-        lines = content.split('\n')
+        # Handle both LF and CRLF line endings consistently
+        lines = content.splitlines()
 
         if line_range:
             start, end = line_range
@@ -802,7 +803,12 @@ def _git_apply_check(patch: str) -> str | None:
     except subprocess.TimeoutExpired:
         return f"git apply --check timed out after {Config.GIT_OPERATIONS_TIMEOUT_SECONDS}s"
     if result.returncode != 0:
-        return result.stderr.strip() or "git apply --check failed with no stderr output"
+        error_msg = result.stderr.strip() or "git apply --check failed with no stderr output"
+        # If the error mentions context or indentation, provide a helpful hint
+        if "context" in error_msg.lower() or "indent" in error_msg.lower():
+            error_msg += "\n\nHint: This may be a whitespace issue (tabs vs spaces). " \
+                         "Ensure the patch uses the same indentation as the original file."
+        return error_msg
     return None
 
 

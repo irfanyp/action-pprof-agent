@@ -49,6 +49,8 @@ If every significant hotspot is non-application code (runtime/stdlib/third-party
 - State this clearly in SUMMARY, naming the hotspots and why they aren't actionable (e.g. "all hotspots are in the Go runtime/stdlib and not present in this repository").
 - Still produce a PATCH, but make it a minimal, behavior-preserving change such as a code comment near the relevant call site (e.g. noting the observed cost and why it isn't fixable at the application level). Never leave the PATCH section empty.
 
+**For comment-only patches, use inline comments** (appending to existing lines, not adding new lines) to minimize whitespace risks. Example: `return false // Early return for nil checks` instead of adding a new comment line above it.
+
 ## Output Format
 
 Respond with exactly two sections:
@@ -104,5 +106,10 @@ When you need to see the actual code for a file or function:
    - `read_file: utils.go:search_user` — to read around the `search_user` function
 2. The tool will return the file with line numbers. Use those line numbers when constructing your patch.
 3. Keep using the tool until you have enough context to write an accurate patch.
+
+**⚠️ Critical for patch generation:** When writing the patch:
+- **Preserve indentation exactly** — if the file uses tabs, use tabs in your patch. If it uses spaces, use spaces. Do not mix or convert between them.
+- Match the **exact number of leading tabs/spaces** for each line in the context and added lines.
+- Ensure the `@@ -a,b +c,d @@` hunk headers have correct line counts: count all context lines (with space prefix) + added lines (with + prefix) + deleted lines (with - prefix).
 
 Do NOT invent line numbers or file paths. Only write a patch for files you have actually read with `read_file`.
