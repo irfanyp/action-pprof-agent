@@ -1569,9 +1569,9 @@ class TestReadFileContextErrors:
         assert "ERROR" not in result
         assert "main" in result
         assert "package" in result
-        # Should have line numbers
-        assert "1:" in result
-        assert "4:" in result
+        # Should have line numbers in new format (L{num}|)
+        assert "L1|" in result
+        assert "L4|" in result
 
 
 class TestPrepareGitCheckout:
