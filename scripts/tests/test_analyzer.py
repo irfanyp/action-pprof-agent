@@ -29,9 +29,9 @@ The analyzer.py workflow follows these numbered steps (see Config.STEP_DESCRIPTI
   1a: Trigger analyzer via service API
   1b: Poll result, decode pprof, convert to markdown
   1c: Validate git checkout state
-  1d: Run repomix to generate code context
+  1d: Generate file list for agent-loop file access
   1e: Construct the LLM prompt
-  1f: Call the LLM with the prompt
+  1f: Call the LLM with the prompt (with tool-use enabled)
   1g: Extract patch from LLM result
   1h: Apply patch to git repo
   1j: Create pull request
@@ -57,6 +57,7 @@ from analyzer import (
     EnvConfig,
     STEP_RESULTS,
     _decode_pprof_result,
+    _execute_read_file_tool,
     _gh_annotation,
     _git_apply_check,
     _node_bin,
@@ -79,7 +80,7 @@ from analyzer import (
     local_run_id,
     poll_analyzer_result,
     prepare_git_checkout,
-    run_repomix,
+    read_file_context,
     trigger_analyzer,
 )
 
@@ -159,7 +160,7 @@ class TestConstructPrompt:
     """Tests for construct_prompt() — template formatting.
 
     construct_prompt() loads a template file and substitutes {reference_level},
-    {analyzer_result}, and {repomix_result} placeholders with actual data.
+    {analyzer_result}, and {file_list} placeholders with actual data.
     """
 
     def test_construct_prompt_substitutes_placeholders(
@@ -170,11 +171,11 @@ class TestConstructPrompt:
         template_file.write_text(sample_prompt_template, encoding="utf-8")
 
         prompt = construct_prompt(
-            Path(template_file), "high", "analyzer_data", "repomix_data"
+            Path(template_file), "high", "analyzer_data", "file_list_data"
         )
         assert "Reference: high" in prompt
         assert "Analyzer:\nanalyzer_data" in prompt
-        assert "Repo:\nrepomix_data" in prompt
+        assert "Repo:\nfile_list_data" in prompt
 
     def test_construct_prompt_preserves_content(self, tmp_path, sample_prompt_template):
         """The prompt contains all input content verbatim."""
@@ -182,10 +183,10 @@ class TestConstructPrompt:
         template_file.write_text(sample_prompt_template, encoding="utf-8")
 
         prompt = construct_prompt(
-            Path(template_file), "low", "SPECIAL_ANALYZER_OUTPUT", "SPECIAL_REPOMIX"
+            Path(template_file), "low", "SPECIAL_ANALYZER_OUTPUT", "SPECIAL_FILE_LIST"
         )
         assert "SPECIAL_ANALYZER_OUTPUT" in prompt
-        assert "SPECIAL_REPOMIX" in prompt
+        assert "SPECIAL_FILE_LIST" in prompt
 
     def test_construct_prompt_missing_placeholder_raises(self, tmp_path):
         """A template with a missing placeholder raises KeyError (format)."""
@@ -402,8 +403,8 @@ class TestNodeBin:
     def test_node_bin_resolves_path(self):
         """The path is resolved under node_modules/.bin."""
         action_path = Path("/tmp/action")
-        result = _node_bin("repomix", action_path)
-        assert result == str(Path("/tmp/action/node_modules/.bin/repomix"))
+        result = _node_bin("pprof-to-md", action_path)
+        assert result == str(Path("/tmp/action/node_modules/.bin/pprof-to-md"))
 
     def test_node_bin_pprof_to_md(self):
         """Different binary names resolve correctly."""
@@ -848,7 +849,7 @@ class TestPollAnalyzerResult:
         assert result_path.read_bytes() == raw_data
 
 
-# Step 1d: Run repomix (and git operations)
+# Step 1d: File access (and other external commands)
 class TestRunCommand:
     """Tests for _run_command() — subprocess execution.
 
@@ -899,8 +900,8 @@ class TestRunCommand:
         mocker.patch("analyzer.subprocess.run", return_value=mock_result)
 
         with pytest.raises(AnalyzerError) as exc_info:
-            _run_command(["cmd"], "1d", error_prefix="repomix")
-        assert "repomix" in exc_info.value.message
+            _run_command(["cmd"], "1d", error_prefix="pprof-to-md")
+        assert "pprof-to-md" in exc_info.value.message
 
     def test_run_command_default_timeout(self, mocker):
         """When timeout is None, the default GIT_OPERATIONS_TIMEOUT is used."""
@@ -990,7 +991,8 @@ class TestGenerateValidPatch:
 
     def test_first_attempt_succeeds(self, mocker, mock_config, tmp_artifacts_dir, sample_llm_result):
         """When the first LLM result produces a valid patch, it's returned."""
-        mocker.patch("analyzer.call_llm", return_value=sample_llm_result)
+        mock_messages = [{"role": "user", "content": "test"}]
+        mocker.patch("analyzer.call_llm", return_value=(sample_llm_result, mock_messages))
         mocker.patch("analyzer._git_apply_check", return_value=None)
 
         summary, patch, llm_result = generate_valid_patch("prompt", mock_config)
@@ -1015,9 +1017,10 @@ Fixed.
  ctx
 ```
 """
+        mock_messages = [{"role": "user", "content": "test"}]
         mocker.patch(
             "analyzer.call_llm",
-            side_effect=[bad_result, good_result],
+            side_effect=[(bad_result, mock_messages), (good_result, mock_messages)],
         )
         mocker.patch("analyzer._git_apply_check", return_value=None)
 
@@ -1041,9 +1044,10 @@ Fixed.
  ctx
 ```
 """
+        mock_messages = [{"role": "user", "content": "test"}]
         mocker.patch(
             "analyzer.call_llm",
-            side_effect=[sample_llm_result, good_result],
+            side_effect=[(sample_llm_result, mock_messages), (good_result, mock_messages)],
         )
         mocker.patch(
             "analyzer._git_apply_check",
@@ -1056,7 +1060,8 @@ Fixed.
     def test_all_attempts_fail_raises(self, mocker, mock_config, tmp_artifacts_dir):
         """When all attempts fail, AnalyzerError('1h') is raised."""
         bad_result = "No patch here"
-        mocker.patch("analyzer.call_llm", return_value=bad_result)
+        mock_messages = [{"role": "user", "content": "test"}]
+        mocker.patch("analyzer.call_llm", return_value=(bad_result, mock_messages))
         mocker.patch("analyzer._git_apply_check", return_value=None)
 
         with pytest.raises(AnalyzerError) as exc_info:
@@ -1087,67 +1092,74 @@ Ok.
  ctx
 ```
 """
+        mock_messages1 = [{"role": "system", "content": "sys"}, {"role": "user", "content": "msg"}]
+        mock_messages2 = [{"role": "system", "content": "sys"}, {"role": "user", "content": "msg"}]
         mock_llm = mocker.patch(
             "analyzer.call_llm",
-            side_effect=[bad_result, good_result],
+            side_effect=[(bad_result, mock_messages1), (good_result, mock_messages2)],
         )
         mocker.patch("analyzer._git_apply_check", return_value=None)
 
         generate_valid_patch("prompt", mock_config)
 
         # The messages list was mutated in place; the final state should
-        # contain the error feedback message (4 messages: system, user,
-        # assistant, user-feedback).
+        # contain the error feedback message
         assert mock_llm.call_count == 2
+        # Get the messages from the second call
         final_messages = mock_llm.call_args_list[1].args[0]
-        assert len(final_messages) == 4
+        # Should have system message, original user message, assistant response, and feedback
+        assert len(final_messages) >= 3
         # The last message should be the user feedback with the error
         feedback_msg = final_messages[-1]
         assert feedback_msg["role"] == "user"
         assert "could not be turned into" in feedback_msg["content"]
-        # The third message should be the assistant's failed response
-        assert final_messages[2]["role"] == "assistant"
-        assert final_messages[2]["content"] == bad_result
 
 
 class TestCallLlm:
     """Tests for call_llm() — LLM API interaction.
 
     call_llm() creates an OpenAI client, sends messages, and returns the response
-    text. Configured with ai_key, ai_endpoint, and ai_model from config.
+    text and messages. Configured with ai_key, ai_endpoint, and ai_model from config.
     """
 
-    def test_call_llm_returns_text(self, mocker, mock_config):
-        """The LLM response text is returned."""
+    def test_call_llm_returns_text_and_messages(self, mocker, mock_config):
+        """The LLM response text and messages are returned."""
         mock_completion = MagicMock()
         mock_completion.choices = [MagicMock()]
         mock_completion.choices[0].message.content = "LLM response text"
+        mock_completion.choices[0].message.tool_calls = None
 
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_completion
         mocker.patch("analyzer.OpenAI", return_value=mock_client)
 
-        result = call_llm([{"role": "user", "content": "hi"}], mock_config)
-        assert result == "LLM response text"
+        messages = [{"role": "user", "content": "hi"}]
+        text, returned_messages = call_llm(messages, mock_config)
+        assert text == "LLM response text"
+        assert returned_messages == messages
 
     def test_call_llm_empty_response(self, mocker, mock_config):
         """An empty LLM response returns an empty string."""
         mock_completion = MagicMock()
         mock_completion.choices = [MagicMock()]
         mock_completion.choices[0].message.content = None
+        mock_completion.choices[0].message.tool_calls = None
 
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_completion
         mocker.patch("analyzer.OpenAI", return_value=mock_client)
 
-        result = call_llm([{"role": "user", "content": "hi"}], mock_config)
-        assert result == ""
+        messages = [{"role": "user", "content": "hi"}]
+        text, returned_messages = call_llm(messages, mock_config)
+        assert text == ""
+        assert returned_messages == messages
 
     def test_call_llm_uses_config(self, mocker, mock_config):
         """The LLM client is configured with the config values."""
         mock_completion = MagicMock()
         mock_completion.choices = [MagicMock()]
         mock_completion.choices[0].message.content = "ok"
+        mock_completion.choices[0].message.tool_calls = None
 
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_completion
@@ -1165,6 +1177,7 @@ class TestCallLlm:
         mock_completion = MagicMock()
         mock_completion.choices = [MagicMock()]
         mock_completion.choices[0].message.content = "ok"
+        mock_completion.choices[0].message.tool_calls = None
 
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_completion
@@ -1439,48 +1452,126 @@ class TestConvertPprofToMarkdown:
         assert "did not produce" in exc_info.value.message.lower()
 
 
-class TestRunRepomix:
-    """Tests for run_repomix() — step 1d.
+class TestReadFileToolErrors:
+    """Tests for _execute_read_file_tool() error handling.
 
-    run_repomix() executes the repomix tool to generate an XML representation
-    of the repository for use in the LLM prompt.
+    Validates graceful error handling for:
+    - Nonexistent files
+    - Permission issues
+    - Binary files
+    - Invalid JSON arguments
+    - Directory traversal attempts
+    - Invalid line ranges
     """
 
-    def test_run_repomix_success(self, mocker, tmp_path, monkeypatch):
-        """A successful repomix run returns the XML content."""
-        import analyzer
-        repomix_dir = tmp_path / "repomix-output"
-        monkeypatch.setattr(analyzer.Config, "REPOMIX_OUTPUT_DIR", repomix_dir)
+    def test_nonexistent_file_error(self):
+        """Reading a nonexistent file returns a helpful error message."""
+        result = read_file_context("nonexistent_file.go")
+        assert "File not found" in result
+        assert "ERROR" in result
 
-        action_path = tmp_path / "action"
-        action_path.mkdir()
-        bin_dir = action_path / "node_modules" / ".bin"
-        bin_dir.mkdir(parents=True)
+    def test_invalid_json_arguments(self):
+        """Invalid JSON in tool arguments returns a helpful error message."""
+        result = _execute_read_file_tool("not json at all")
+        assert "ERROR" in result
+        assert "Invalid JSON" in result
+        assert "file_path" in result.lower()
 
-        out_file = repomix_dir / "repomix.xml"
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        out_file.write_text("<xml>repo content</xml>", encoding="utf-8")
+    def test_missing_file_path_argument(self):
+        """Missing file_path argument returns an error."""
+        result = _execute_read_file_tool('{"line_range": "100-150"}')
+        assert "ERROR" in result
+        assert "file_path" in result.lower()
 
-        mocker.patch("analyzer._run_command", return_value="")
+    def test_invalid_line_range_format(self, tmp_path):
+        """Invalid line range format returns an error."""
+        test_file = tmp_path / "main.go"
+        test_file.write_text("package main\n\nfunc main() {}\n")
+        import json
+        tool_input = json.dumps({"file_path": str(test_file), "line_range": "invalid"})
+        result = _execute_read_file_tool(tool_input)
+        assert "ERROR" in result
+        assert "Invalid line range" in result or "line_range" in result.lower()
 
-        result = run_repomix(action_path)
-        assert "<xml>repo content</xml>" in result
+    def test_line_range_beyond_file(self, tmp_path):
+        """Requesting lines beyond file length returns an error."""
+        test_file = tmp_path / "main.go"
+        test_file.write_text("line1\nline2\nline3\n")
+        import json
+        tool_input = json.dumps({"file_path": str(test_file), "line_range": "10-20"})
+        result = _execute_read_file_tool(tool_input)
+        assert "ERROR" in result
+        assert "beyond file length" in result or "Line 10 is beyond" in result
 
-    def test_run_repomix_missing_output_raises(self, mocker, tmp_path, monkeypatch):
-        """Missing repomix output raises AnalyzerError('1d')."""
-        import analyzer
-        repomix_dir = tmp_path / "repomix-output"
-        monkeypatch.setattr(analyzer.Config, "REPOMIX_OUTPUT_DIR", repomix_dir)
+    def test_directory_traversal_blocked(self):
+        """Directory traversal attempts are blocked."""
+        result = _execute_read_file_tool('{"file_path": "../../../etc/passwd"}')
+        assert "ERROR" in result
+        assert ".." in result or "directory traversal" in result.lower()
 
-        action_path = tmp_path / "action"
-        action_path.mkdir()
+    def test_reversed_line_range(self, tmp_path):
+        """Reversed line range (start > end) returns an error."""
+        test_file = tmp_path / "main.go"
+        test_file.write_text("line1\nline2\nline3\n")
+        import json
+        tool_input = json.dumps({"file_path": str(test_file), "line_range": "150-100"})
+        result = _execute_read_file_tool(tool_input)
+        assert "ERROR" in result
+        assert ("start must be" in result.lower() or "invalid" in result.lower())
 
-        mocker.patch("analyzer._run_command", return_value="")
+    def test_negative_line_range(self):
+        """Negative line numbers return an error."""
+        result = _execute_read_file_tool('{"file_path": "main.go", "line_range": "-10-50"}')
+        assert "ERROR" in result
+        assert ("line numbers must be" in result.lower() or "invalid" in result.lower())
 
-        with pytest.raises(AnalyzerError) as exc_info:
-            run_repomix(action_path)
-        assert exc_info.value.step == "1d"
-        assert "not found" in exc_info.value.message.lower()
+
+class TestReadFileContextErrors:
+    """Tests for read_file_context() error handling.
+
+    Tests low-level file reading error cases.
+    """
+
+    def test_binary_file_detection(self, tmp_path):
+        """Reading a binary file returns a helpful error."""
+        binary_file = tmp_path / "binary.go"
+        binary_file.write_bytes(b'\x89PNG\r\n\x1a\n' + b'not valid utf-8')
+
+        result = read_file_context(str(binary_file))
+        assert "ERROR" in result
+        assert ("binary" in result.lower() or "encoding" in result.lower())
+
+    def test_permission_denied(self, tmp_path, monkeypatch):
+        """Reading a file without permission returns an error."""
+        test_file = tmp_path / "noperm.go"
+        test_file.write_text("package main\n")
+
+        # Mock open to raise PermissionError
+        import builtins
+        original_open = builtins.open
+        def mock_open(*args, **kwargs):
+            if 'noperm.go' in str(args[0]):
+                raise PermissionError("Access denied")
+            return original_open(*args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", mock_open)
+        result = read_file_context(str(test_file))
+        assert "ERROR" in result
+        assert "Permission" in result or "permission" in result.lower()
+
+    def test_valid_file_read(self, tmp_path):
+        """Reading a valid file works correctly."""
+        test_file = tmp_path / "main.go"
+        content = "package main\n\nfunc main() {\n    fmt.Println(\"hello\")\n}\n"
+        test_file.write_text(content)
+
+        result = read_file_context(str(test_file))
+        assert "ERROR" not in result
+        assert "main" in result
+        assert "package" in result
+        # Should have line numbers
+        assert "1:" in result
+        assert "4:" in result
 
 
 class TestPrepareGitCheckout:

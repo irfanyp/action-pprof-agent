@@ -52,12 +52,12 @@ The action runs a Python orchestration script (`scripts/analyzer.py`) that perfo
 | **1a** | `POST {SERVICE_URL}/runs` — authenticate and trigger the analyzer execution. Returns a `run_id`. |
 | **1b** | `GET {SERVICE_URL}/runs/{run_id}` — poll periodically (every 15s, timeout 10 min) until the analyzer result is ready. The completed response carries a base64-encoded raw pprof profile (e.g. `*.pb.gz`) in the `result` field. The profile is decoded and converted to LLM-friendly markdown via `pprof-to-md`. |
 | **1c** | Verify the git checkout is on the requested branch/tag. |
-| **1d** | Run `repomix --style xml` to generate an LLM-compatible XML of the repository. |
-| **1e** | Construct the prompt from the template, analyzer result (markdown), repomix XML, and reference level. |
-| **1f** | Feed the prompt to the LLM via the OpenAI-compatible endpoint. |
+| **1d** | Generate a list of Go files in the repository for the agent loop. |
+| **1e** | Construct the prompt from the template, analyzer result (markdown), file list, and reference level. |
+| **1f** | Feed the prompt to the LLM via the OpenAI-compatible endpoint with tool-use enabled. The LLM can use the `read_file` tool to request specific files/line ranges as needed. |
 | **1g** | Extract the `git patch` (unified diff) and summary from the LLM result. |
 | **1h** | Apply the patch with `git apply`. |
-| **1i** | Write artifacts (`patch.diff`, `llm_result.txt`, `repomix_result.xml`, `analyzer_result.md`, `raw_profile.pb.gz`) to `./artifacts/`; the composite action uploads them as workflow artifacts. |
+| **1i** | Write artifacts (`patch.diff`, `llm_result.txt`, `analyzer_result.md`, `raw_profile.pb.gz`) to `./artifacts/`; the composite action uploads them as workflow artifacts. |
 | **1j** | Create a new branch, commit, push, and open a Pull Request via `gh pr create`. The PR targets the repository's default branch (auto-detected via `gh repo view`) unless `base_branch` is set. The PR description is derived from the LLM summary. |
 | **1k** | `POST {SERVICE_URL}/runs/{run_id}/submit` — flag the execution as done/submitted. |
 
@@ -169,7 +169,6 @@ The Go service being analyzed must expose a **pprof-enabled endpoint** so the an
 
 The composite action installs everything it needs:
 
-- **repomix** — pinned in `package.json` and installed reproducibly via `npm ci` from `package-lock.json`. Versions are kept up to date automatically by Dependabot (npm ecosystem).
 - **pprof-to-md** — pinned in `package.json` and installed reproducibly via `npm ci` from `package-lock.json`. Converts raw pprof profiles (`.pb.gz`) to LLM-friendly markdown. Versions are kept up to date automatically by Dependabot (npm ecosystem).
 - **Python 3.11** — via `actions/setup-python`; dependencies (`openai`, `GitPython`, `requests`) installed from `scripts/requirements.txt`.
 - **git** — available on GitHub runners; the action configures a bot identity for commits.
@@ -178,14 +177,14 @@ The composite action installs everything it needs:
 
 ## Cleanup
 
-A `post`-style cleanup step (runs with `if: always()`) removes temporary artifacts (`./artifacts`, `./repomix-output`), deletes any leftover local `pprof/fix-*` branches that were not turned into a PR, and scrubs secret environment variables (`AI_KEY`, `GITHUB_TOKEN`) from the job environment.
+A `post`-style cleanup step (runs with `if: always()`) removes temporary artifacts (`./artifacts`), deletes any leftover local `pprof/fix-*` branches that were not turned into a PR, and scrubs secret environment variables (`AI_KEY`, `GITHUB_TOKEN`) from the job environment.
 
 ## Repository structure
 
 ```
 pprof-analyzer/
 ├── action.yml                       # Composite action definition
-├── package.json                     # Pinned npm tooling (repomix, pprof-to-md)
+├── package.json                     # Pinned npm tooling (pprof-to-md)
 ├── package-lock.json                # Reproducible npm installs (npm ci)
 ├── .github/
 │   └── dependabot.yml               # Auto-updates: github-actions, pip, npm

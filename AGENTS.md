@@ -8,8 +8,8 @@ Guidance for AI agents (e.g. Claude Code, Cline, Copilot) working in this reposi
 
 1. Triggers a pprof analyzer service (or loads a raw pprof profile from a file).
 2. Converts the raw profile to LLM-friendly markdown via `pprof-to-md`.
-3. Generates an XML snapshot of the repository with `repomix`.
-4. Feeds the analyzer result + repo context to an LLM (OpenAI-compatible endpoint).
+3. Lists repository files and feeds the analyzer result + file list to an LLM (OpenAI-compatible endpoint).
+4. The LLM uses a `read_file` tool to request specific files/line ranges as needed (agent loop).
 5. Extracts a unified-diff patch from the LLM response and applies it with `git apply`.
 6. Creates a branch, commits, pushes, and opens a Pull Request via `gh`.
 
@@ -20,7 +20,7 @@ See [`README.md`](README.md) for the full flow, inputs, and outputs.
 ```
 pprof-analyzer/
 ├── action.yml                       # Composite action definition
-├── package.json                     # Pinned npm tooling (repomix, pprof-to-md)
+├── package.json                     # Pinned npm tooling (pprof-to-md)
 ├── package-lock.json                # Reproducible npm installs (npm ci)
 ├── .github/
 │   ├── dependabot.yml               # Auto-updates: github-actions, pip, npm
@@ -58,7 +58,7 @@ The folder itself is tracked in git (via a `.gitkeep` placeholder), but its **co
 
 - **Python**: 3.11+. Runtime deps in `scripts/requirements.txt`, dev/test deps in `scripts/requirements-dev.txt`.
 - **Tests**: run with `pytest` from the repo root. Test files live in `scripts/tests/`.
-- **Node tooling**: `repomix` and `pprof-to-md` are pinned in `package.json` and installed via `npm ci`. Do not use global installs — Dependabot tracks versions via `package-lock.json`.
+- **Node tooling**: `pprof-to-md` is pinned in `package.json` and installed via `npm ci`. Do not use global installs — Dependabot tracks versions via `package-lock.json`.
 - **Code style**: follow existing conventions in the file you are editing. The Python code uses `from __future__ import annotations`, type hints, and docstrings.
 - **Commits**: when making a commit, append `Co-Authored-By: Cline SR` to the commit message. If your environment specifies a different attribution (e.g., from harness settings), use that instead.
 
@@ -131,7 +131,7 @@ The analyzer sends repository context and pprof profiles to an LLM endpoint. Han
 ### Credentials
 - **Environment variables only** — API keys and endpoint URLs are passed via environment variables, never hardcoded in scripts or committed to the repo.
 - **No credentials in logs** — When debugging, redact or omit sensitive values from logs and error messages.
-- **No credentials in prompts** — Repository snapshots and profiles may contain PII or security-sensitive information. Review `repomix` output before sending to the LLM.
+- **No credentials in prompts** — Repository files and profiles may contain PII or security-sensitive information. Verify file requests via the `read_file` tool before sending to the LLM.
 
 ### Prompt injection & output validation
 - **Sanitize prompt inputs** — If a prompt includes user-controlled input (file names, error messages), validate for injection patterns before passing to the LLM.
