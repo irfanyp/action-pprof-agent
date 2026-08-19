@@ -24,8 +24,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --no-cache-dir -r scripts/requirements-dev.txt
+          pip install --no-cache-dir -r action/scripts/requirements-dev.txt
 
       - name: Run tests
         run: |
-          python -m pytest scripts/tests/ -v --tb=short
+          python -m pytest action/scripts/tests/ -v --tb=short

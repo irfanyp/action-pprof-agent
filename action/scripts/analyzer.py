@@ -293,17 +293,17 @@ def _write_step_summary(run_id: str) -> None:
 def _node_bin(name: str, action_path: Path) -> str:
     """Resolve an npm-installed CLI binary from the action's local node_modules.
 
-    The composite action runs ``npm ci`` in ``${ACTION_PATH}`` (see action.yml),
-    which installs ``pprof-to-md`` into ``${ACTION_PATH}/node_modules/.bin``.
+    The composite action runs ``npm ci`` in ``${ACTION_PATH}/action`` (see action.yml),
+    which installs ``pprof-to-md`` into ``${ACTION_PATH}/action/node_modules/.bin``.
     This helper returns the absolute path to the requested binary so the analyzer
     can invoke the exact pinned version regardless of the current working directory
     or global PATH.
 
     Using the local binary (instead of ``npx --yes <pkg>``) avoids a network
     re-resolve at runtime and guarantees the version pinned in
-    ``package-lock.json`` is the one that runs.
+    ``action/package-lock.json`` is the one that runs.
     """
-    candidate = action_path / "node_modules" / ".bin" / name
+    candidate = action_path / "action" / "node_modules" / ".bin" / name
     return str(candidate)
 
 
@@ -1012,7 +1012,7 @@ def main() -> int:
         print(f"ERROR during initialization: {exc.message}", file=sys.stderr)
         return 2
 
-    prompt_template = config.action_path / "scripts" / "prompts" / "prompt_template.txt"
+    prompt_template = config.action_path / "action" / "scripts" / "prompts" / "prompt_template.txt"
 
     # File-based (testing) mode: when ANALYZER_RESULT_FILE is set, load a
     # raw pprof profile from a local file and skip all SERVICE_URL
