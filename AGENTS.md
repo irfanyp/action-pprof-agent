@@ -286,12 +286,14 @@ These elements appear in both files and should stay synchronized:
 - ❌ Changes to `smart_select_files()`, `find_imports_in_file()` — Action uses simpler file listing
 - ❌ Changes to artifact output location (`.ai_output/` vs `artifacts/`) — Directories differ by design
 
-**Prompt changes (both locations):**
-When updating [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt):
-1. Always update [.claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt](.claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt) as well
-2. Both must match exactly for consistent LLM behavior
-3. Test both implementations after prompt changes
-4. Regenerate the skill ZIP file (see below)
+**Prompt template (single source of truth):**
+- **Source**: [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt) is the **canonical version**
+- **Sync mechanism**: [.claude/skills/build-zip.sh](.claude/skills/build-zip.sh) automatically copies it to [.claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt](.claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt) before creating the ZIP
+- **Workflow**: When updating the prompt template:
+  1. Edit [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt) only
+  2. Run [.claude/skills/build-zip.sh](.claude/skills/build-zip.sh) — it will sync the skill version automatically
+  3. Commit both the prompt template change and the regenerated ZIP
+  4. Test both implementations (action and skill) with sample profiles
 
 ### Regenerating the skill ZIP file
 

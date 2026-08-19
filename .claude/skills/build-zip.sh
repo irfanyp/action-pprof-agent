@@ -22,6 +22,11 @@ echo "Building skill ZIP: $ZIP_PATH"
 
 cd "$REPO_ROOT"
 
+# Sync prompt template from action (single source of truth)
+echo "Syncing prompt template from action/scripts/ ..."
+cp action/scripts/prompts/prompt_template.txt \
+   .claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt
+
 python3 << 'PYTHON_EOF'
 import zipfile
 import os
