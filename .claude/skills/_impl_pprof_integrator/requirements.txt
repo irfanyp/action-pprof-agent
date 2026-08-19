@@ -1,0 +1,2 @@
+# pprof-integrator requirements
+# Minimal dependencies - coordinator.py uses only stdlib
