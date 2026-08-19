@@ -12,9 +12,9 @@ updates:
       - "dependencies"
       - "github-actions"
 
-  # Keep Python dependencies in scripts/requirements.txt up to date
+  # Keep Python dependencies in action/scripts/requirements.txt up to date
   - package-ecosystem: "pip"
-    directory: "/scripts"
+    directory: "/action/scripts"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -24,9 +24,9 @@ updates:
       - "dependencies"
       - "python"
 
-  # Keep npm tooling (repomix, pprof-to-md) in package.json up to date
+  # Keep npm tooling (pprof-to-md) in action/package.json up to date
   - package-ecosystem: "npm"
-    directory: "/"
+    directory: "/action"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2

@@ -4,8 +4,10 @@ Guidance for AI agents (e.g. Claude Code, Cline, Copilot) working in this reposi
 
 ## Project overview
 
-**pprof-analyzer** is a reusable GitHub Action that:
+**pprof-analyzer** has two implementations:
 
+### 1. GitHub Action (action/scripts/analyzer.py)
+A reusable GitHub Action that:
 1. Triggers a pprof analyzer service (or loads a raw pprof profile from a file).
 2. Converts the raw profile to LLM-friendly markdown via `pprof-to-md`.
 3. Lists repository files and feeds the analyzer result + file list to an LLM (OpenAI-compatible endpoint).
@@ -13,32 +15,122 @@ Guidance for AI agents (e.g. Claude Code, Cline, Copilot) working in this reposi
 5. Extracts a unified-diff patch from the LLM response and applies it with `git apply`.
 6. Creates a branch, commits, pushes, and opens a Pull Request via `gh`.
 
-See [`README.md`](README.md) for the full flow, inputs, and outputs.
+### 2. Claude Code Skill (.claude/skills/_impl_pprof_analyzer/)
+A Claude Code skill that analyzes pprof profiles locally:
+1. Reads pprof profile from file.
+2. Converts the raw profile to LLM-friendly markdown via `pprof-to-md`.
+3. Intelligently selects relevant Go source files (hotspot files + imports).
+4. Reads all source code upfront (no agent loop needed).
+5. Constructs a comprehensive prompt with all context.
+6. Claude analyzes the prompt and generates SUMMARY + PATCH (single turn, no API calls).
+7. Extracts patch, validates with `git apply --check`.
+8. Writes artifacts to `.ai_output/` for user review.
+
+Key difference: **Skill uses Claude's built-in capabilities; Action uses external LLM API.**
+
+See [`README.md`](README.md) for detailed flow of both implementations.
 
 ## Key files & structure
 
 ```
 pprof-analyzer/
-├── action.yml                       # Composite action definition
-├── package.json                     # Pinned npm tooling (pprof-to-md)
-├── package-lock.json                # Reproducible npm installs (npm ci)
+├── action.yml                       # Composite action definition (GitHub Action, at root)
 ├── .github/
 │   ├── dependabot.yml               # Auto-updates: github-actions, pip, npm
 │   └── workflows/test.yml           # CI test workflow
-├── scripts/
-│   ├── analyzer.py                  # Main orchestration script (steps 1a–1k)
-│   ├── requirements.txt             # Python runtime dependencies
-│   ├── requirements-dev.txt         # Python dev/test dependencies
-│   ├── prompts/
-│   │   └── prompt_template.txt       # LLM prompt template
-│   └── tests/
-│       ├── conftest.py              # Pytest fixtures
-│       └── test_analyzer.py          # Unit tests
-├── examples/
-│   └── workflow.yml                 # Example caller workflow
-├── pprof_integration.md             # Guide for integrating net/http/pprof into target Go services
-└── README.md
+├── action/
+│   ├── action.yml                   # (see: action.yml at root, kept for reference)
+│   ├── scripts/
+│   │   ├── analyzer.py              # GitHub Action orchestration (steps 1a–1k)
+│   │   ├── requirements.txt         # Python dependencies (openai, GitPython, requests)
+│   │   ├── requirements-dev.txt     # Python dev/test dependencies
+│   │   ├── prompts/
+│   │   │   └── prompt_template.txt  # LLM prompt template
+│   │   └── tests/
+│   │       ├── conftest.py          # Pytest fixtures
+│   │       └── test_analyzer.py     # Unit tests
+│   ├── package.json                 # Pinned npm tooling (pprof-to-md)
+│   ├── package-lock.json            # Reproducible npm installs (npm ci)
+│   ├── pprof_integration.md         # Guide for integrating pprof into Go services
+│   ├── README.md                    # GitHub Action documentation
+│   └── examples/
+│       └── workflow.yml             # Example GitHub Action workflow
+├── skill/
+│   ├── README.md                    # Skill distribution documentation
+│   ├── SIMPLIFIED_DESIGN.md         # Design decisions for the skill
+│   ├── SKILL_DISTRIBUTION.md        # How to share the skill
+│   ├── IMPLEMENTATION_SUMMARY.md    # Technical details
+│   └── pprof-analyzer-skill.zip     # Distributable skill package
+├── .claude/
+│   └── skills/
+│       ├── pprof-analyzer.md        # Claude Code skill definition
+│       └── _impl_pprof_analyzer/
+│           ├── analyzer.py          # Skill orchestration (simplified, no API calls)
+│           ├── requirements.txt     # Python dependencies (GitPython only)
+│           ├── SETUP.sh             # Automatic installation script
+│           ├── INSTALL.md           # Installation guide
+│           ├── README.md            # Skill documentation
+│           ├── prompts/
+│           │   └── prompt_template.txt  # Modified for single-turn analysis
+│           ├── tests/
+│           │   └── test_analyzer.py
+│           └── examples/
+│               └── workflow_example.md
+├── README.md                        # Navigation hub (entry point)
+├── AGENTS.md                        # This file (developer guidance)
+└── CLAUDE.md                        # Project instructions for AI agents
 ```
+
+## Implementation Flows
+
+### GitHub Action Flow (action/scripts/analyzer.py)
+
+The action runs these steps in sequence:
+
+1. **1a** — `POST /runs` to SERVICE_URL to trigger analyzer execution. Returns `run_id`.
+2. **1b** — Poll SERVICE_URL every 15s (timeout: 10 min) until status = "completed". Decode base64 profile, convert to markdown via `pprof-to-md`.
+3. **1c** — Verify git checkout is on requested branch/tag.
+4. **1d** — Generate list of Go files in repo (for agent loop file access).
+5. **1e** — Construct prompt from template + pprof markdown + file list + reference level.
+6. **1f** — Call LLM (OpenAI-compatible endpoint) with tool-use enabled. LLM can call `read_file` tool to request specific files/lines.
+7. **1g** — Extract SUMMARY section and unified-diff PATCH from LLM response.
+8. **1h** — Apply patch with `git apply --whitespace=fix`.
+9. **1i** — Write artifacts (`patch.diff`, `llm_result.txt`, `analyzer_result.md`, `raw_profile.pb.gz`) to `./artifacts/`.
+10. **1j** — Create branch `pprof/fix-{run_id}`, commit, push, and open PR via `gh`.
+11. **1k** — `POST /runs/{run_id}/submit` to SERVICE_URL to flag execution as done.
+
+**If any step 1b–1j fails:** Call step **2a** to `POST /runs/{run_id}/error` to SERVICE_URL.
+
+**When `analyzer_result_file` is set (file mode):** Skip steps 1a, 1b (service polling), 1k, and 2a (no service interaction). Load profile from file instead. Generate local `run_id` (form: `local-<timestamp>`).
+
+### Claude Code Skill Flow (.claude/skills/_impl_pprof_analyzer/analyzer.py)
+
+The skill runs these steps locally:
+
+1. **Validate inputs** — Check profile file, repo path, reference level.
+2. **Convert pprof** — Run `pprof-to-md --format detailed` to convert raw profile to markdown.
+3. **Extract hotspots** — Parse markdown to find file paths mentioned in hotspots.
+4. **Find Go files** — Use `git ls-files` to enumerate all Go files in repo.
+5. **Smart select files** — Include hotspot files + direct imports, cap at ~75KB of code.
+6. **Read source code** — Read all selected files with line numbers, format as `L{num}| {content}`.
+7. **Build prompt** — Combine reference level instructions + pprof markdown + source code in prompt template.
+8. **Return for analysis** — Return prompt to Claude (Claude Code context; no external API call).
+9. **Extract SUMMARY & PATCH** — Parse Claude's response for `### SUMMARY` and `### PATCH` sections.
+10. **Validate patch** — Run `git apply --check` to dry-run the patch.
+11. **Write artifacts** — Save to `.ai_output/`:
+    - `summary.md` — Analysis table + explanation
+    - `patch.diff` — Unified diff patch
+    - `analyzer_result.md` — Pprof analysis
+    - `prompt.txt` — Full prompt sent to Claude
+    - `prompt_for_claude.txt` — Formatted prompt for review
+
+**Key differences from Action:**
+- ✅ No external LLM API calls (uses built-in Claude)
+- ✅ No `read_file` tool loop (all code upfront)
+- ✅ Single-turn analysis (no retries or refinement)
+- ✅ No PR creation (user does it manually)
+- ✅ No SERVICE_URL interaction
+- ✅ No credentials/API keys needed
 
 ## Output convention — generated markdown goes in `.ai_output/`
 
@@ -56,9 +148,9 @@ The folder itself is tracked in git (via a `.gitkeep` placeholder), but its **co
 
 ## Development conventions
 
-- **Python**: 3.11+. Runtime deps in `scripts/requirements.txt`, dev/test deps in `scripts/requirements-dev.txt`.
-- **Tests**: run with `pytest` from the repo root. Test files live in `scripts/tests/`.
-- **Node tooling**: `pprof-to-md` is pinned in `package.json` and installed via `npm ci`. Do not use global installs — Dependabot tracks versions via `package-lock.json`.
+- **Python**: 3.11+. Runtime deps in `action/scripts/requirements.txt`, dev/test deps in `action/scripts/requirements-dev.txt`.
+- **Tests**: run with `pytest` from the repo root. Test files live in `action/scripts/tests/`.
+- **Node tooling**: `pprof-to-md` is pinned in `action/package.json` and installed via `npm ci`. Do not use global installs — Dependabot tracks versions via `action/package-lock.json`.
 - **Code style**: follow existing conventions in the file you are editing. The Python code uses `from __future__ import annotations`, type hints, and docstrings.
 - **Commits**: when making a commit, append `Co-Authored-By: Cline SR` to the commit message. If your environment specifies a different attribution (e.g., from harness settings), use that instead.
 
@@ -83,13 +175,13 @@ The folder itself is tracked in git (via a `.gitkeep` placeholder), but its **co
 4. **One refactor per PR** — Don't mix refactors with feature additions or bug fixes.
 
 ### Updating the LLM prompt
-1. **Locate the prompt** — See `scripts/prompts/prompt_template.txt`.
-2. **Test with sample profiles** — Run `analyzer.py` locally with a test pprof profile to validate the prompt.
+1. **Locate the prompt** — See `action/scripts/prompts/prompt_template.txt`.
+2. **Test with sample profiles** — Run `action/scripts/analyzer.py` locally with a test pprof profile to validate the prompt.
 3. **Validate output format** — Ensure the LLM still responds with a valid unified-diff patch that can be parsed by `git apply`.
 4. **Run integration tests** — Execute the full action workflow to confirm end-to-end behavior.
 
 ### Adding or updating tests
-1. **Follow existing structure** — Use fixtures from `scripts/tests/conftest.py`.
+1. **Follow existing structure** — Use fixtures from `action/scripts/tests/conftest.py`.
 2. **Name tests clearly** — Test names should describe the scenario, not just the function (e.g., `test_analyzer_handles_malformed_profile` not `test_analyzer_3`).
 3. **Run the full suite** — `pytest` from the repo root to ensure no regressions.
 4. **Aim for coverage** — Prioritize testing the main flow, error paths, and edge cases.
@@ -101,9 +193,9 @@ Use this checklist to verify your work before opening a pull request.
 ### Feature additions
 - ✅ Unit tests pass: `pytest`
 - ✅ Integration test passes: `pytest` with the full test suite
-- ✅ Example workflow still works: `examples/workflow.yml` produces expected output
+- ✅ Example workflow still works: `action/examples/workflow.yml` produces expected output
 - ✅ LLM output format validated: If using the LLM, confirm response parses correctly
-- ✅ No new dependencies outside `package.json` or `requirements.txt`
+- ✅ No new dependencies outside `action/package.json` or `action/scripts/requirements.txt`
 
 ### Bug fixes
 - ✅ Root cause documented in commit message
@@ -119,7 +211,7 @@ Use this checklist to verify your work before opening a pull request.
 - ✅ Code is more maintainable: Easier to read, fewer duplication points, clearer organization
 
 ### Prompt or script updates
-- ✅ Tested with sample pprof profile: `python scripts/analyzer.py <test_profile>`
+- ✅ Tested with sample pprof profile: `python action/scripts/analyzer.py <test_profile>`
 - ✅ Output validated: LLM response format is correct, patch applies cleanly
 - ✅ End-to-end test passes: Full action workflow runs without errors
 - ✅ All existing tests still pass: `pytest`
@@ -179,12 +271,12 @@ Code clarity matters more than brevity. A straightforward 10-line function is be
 - If you must change inputs/outputs, write migration notes and bump the version.
 - Changes to internal action steps are lower-risk but still warrant a comment in the PR.
 
-### Don't vendor or pin dependencies outside `package.json` / `requirements.txt`
-**Principle:** Dependabot tracks and auto-updates dependencies via `package.json` and `requirements*.txt` files. Hardcoding versions in scripts bypasses security updates and creates maintenance debt.
+### Don't vendor or pin dependencies outside `action/package.json` / `action/scripts/requirements.txt`
+**Principle:** Dependabot tracks and auto-updates dependencies via `action/package.json` and `action/scripts/requirements*.txt` files. Hardcoding versions in scripts bypasses security updates and creates maintenance debt.
 
 **What to do instead:**
-- Always declare dependencies in `requirements.txt` (runtime) or `requirements-dev.txt` (dev).
-- Use `npm ci` to install pinned versions from `package-lock.json`.
+- Always declare dependencies in `action/scripts/requirements.txt` (runtime) or `action/scripts/requirements-dev.txt` (dev).
+- Use `npm ci` to install pinned versions from `action/package-lock.json`.
 - Let Dependabot auto-update; version bumps should go through PRs for review.
 
 ### Don't add error handling for impossible scenarios
@@ -221,7 +313,7 @@ Stop and request guidance or approval for:
 
 - **Changes to `action.yml`** — Input/output signatures or behavior changes that affect callers.
 - **Breaking API changes** — Removing functions, changing parameter types, or altering existing behavior.
-- **Dependency changes** — Adding new dependencies, removing old ones, or pinning versions outside `requirements.txt` / `package.json`.
+- **Dependency changes** — Adding new dependencies, removing old ones, or pinning versions outside `action/scripts/requirements.txt` / `action/package.json`.
 - **Security decisions** — If a change involves credentials, auth, or how sensitive data is handled, discuss first.
 - **Large refactors** — Significant reorganization of `analyzer.py` or restructuring of directories.
 - **When you're uncertain** — If you're unsure whether a change is in scope, ask. Better to clarify upfront than to spend time on a PR that gets rejected.
