@@ -28,11 +28,12 @@ def main() -> int:
         print(f"Error: Not a Go module (no go.mod found): {repo_path}")
         return 1
 
-    # Read the pprof integration guide
-    guide_path = Path(__file__).parent.parent.parent.parent / "action" / "pprof_integration.md"
+    # Read the pprof integration guide (included in skill package)
+    guide_path = Path(__file__).parent / "pprof_integration.md"
 
     if not guide_path.exists():
         print(f"Error: pprof_integration.md not found at {guide_path}")
+        print(f"Skill may not be properly installed. Check {Path(__file__).parent}")
         return 1
 
     with open(guide_path) as f:
