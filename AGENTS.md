@@ -226,6 +226,123 @@ User starts with a raw Go service:
 - `pprof-to-md` available in PATH (installed via action/package.json)
 - Load testing tool for step 2 (k6, wrk, Apache Bench, etc.)
 
+## Synchronization between Action and Skill implementations
+
+The two implementations ([action/scripts/analyzer.py](action/scripts/analyzer.py) and [.claude/skills/_impl_pprof_analyzer/analyzer.py](.claude/skills/_impl_pprof_analyzer/analyzer.py)) are **intentionally different** but share some common logic and patterns. This section clarifies when changes in one should be reflected in the other.
+
+### Intentional design differences
+
+**GitHub Action (action/scripts/analyzer.py):**
+- Full orchestration: steps 1a–1k, 2a (1140 lines)
+- Calls external LLM endpoint with tool-use enabled
+- Agent loop: LLM can call `read_file` tool to request files/lines as needed
+- Applies patches, creates branches, commits, pushes, opens PRs
+- Handles polling, error flagging, step status tracking
+- Requires: `openai`, `requests`, `tiktoken`, `GitPython`
+
+**Claude Code Skill (.claude/skills/_impl_pprof_analyzer/analyzer.py):**
+- Local context gathering only (424 lines)
+- No external LLM API calls
+- Reads all code upfront using `smart_select_files()`
+- Returns prompt for Claude (in Claude Code context) to analyze
+- No patch application or PR creation
+- Requires: `GitPython` only (stdlib for everything else)
+
+### Shared components (keep in sync)
+
+These elements appear in both files and should stay synchronized:
+
+1. **Regex patterns** — For parsing LLM responses:
+   - `PATCH_FENCE_PATTERN = r"```(?:diff[a-z-]*)?\n(.*?)```"`
+   - `SUMMARY_PATTERN = r"###\s*SUMMARY\s*\n(.*?)(?:###\s*PATCH|\Z)"`
+   - Location: `Config.PATCH_FENCE_PATTERN` (action), `SkillConfig.PATCH_FENCE_PATTERN` (skill)
+   - Reason: Both parse SUMMARY/PATCH structure from LLM responses; must match exactly
+
+2. **Reference levels** — Valid values for profiling depth:
+   - `VALID_REFERENCES = {"low", "med", "high"}`
+   - Location: `Config.VALID_REFERENCES` (action), `SkillConfig.VALID_REFERENCES` (skill)
+   - Reason: Both accept same reference level inputs
+
+3. **Timeout constants** — For reliability:
+   - `PPROF_TO_MD_TIMEOUT`: 60 seconds
+   - `GIT_OPERATIONS_TIMEOUT`: 120 seconds
+   - Reason: Both run same pprof-to-md and git apply operations
+
+### When to sync changes
+
+**Always sync (change BOTH files):**
+- ✅ Update `PATCH_FENCE_PATTERN` or `SUMMARY_PATTERN` — If LLM response format changes
+- ✅ Add new reference level to `VALID_REFERENCES` — If profiling depth options expand
+- ✅ Update `prompt_template.txt` — If prompt structure changes (used by both)
+- ✅ Update pprof-to-md invocation — If command arguments change
+
+**Action-only changes (no sync needed):**
+- ❌ Changes to `read_file_context()`, `_execute_read_file_tool()`, `call_llm()` — Skill doesn't use agent loop
+- ❌ Changes to `apply_patch()`, `create_pull_request()` — Skill doesn't apply patches
+- ❌ Changes to SERVICE_URL interaction (steps 1a, 1k, 2a) — Skill has no service integration
+- ❌ Changes to GitHub Actions step tracking and annotations
+
+**Skill-only changes (no sync needed):**
+- ❌ Changes to `smart_select_files()`, `find_imports_in_file()` — Action uses simpler file listing
+- ❌ Changes to artifact output location (`.ai_output/` vs `artifacts/`) — Directories differ by design
+
+**Prompt changes (both locations):**
+When updating [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt):
+1. Always update [.claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt](.claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt) as well
+2. Both must match exactly for consistent LLM behavior
+3. Test both implementations after prompt changes
+4. Regenerate the skill ZIP file (see below)
+
+### Regenerating the skill ZIP file
+
+The [skill/pprof-analyzer-skill.zip](skill/pprof-analyzer-skill.zip) is a distributable package for sharing the skill outside the repository.
+
+**When to regenerate:**
+- After changes to any `.claude/skills/_impl_*` files
+- After changes to `.claude/skills/*.md` skill definitions
+- After changes to shared files like `action/pprof_integration.md`
+
+**How to regenerate:**
+```bash
+cd /home/srin/pprof/pprof-analyzer
+python3 -c "
+import zipfile
+import os
+from pathlib import Path
+
+zip_path = Path('skill/pprof-analyzer-skill.zip')
+root_dir = Path('.')
+
+# Files and directories to include in the zip
+includes = [
+    '.claude/skills/',
+    'action/pprof_integration.md',
+    'skill/README.md',
+    'skill/INSTALL.md',
+    'skill/SIMPLIFIED_DESIGN.md',
+    'skill/SKILL_DISTRIBUTION.md',
+    'skill/IMPLEMENTATION_SUMMARY.md',
+]
+
+with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+    for include in includes:
+        path = root_dir / include
+        if path.is_dir():
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    file_path = Path(root) / file
+                    arcname = str(file_path.relative_to(root_dir))
+                    zf.write(file_path, arcname)
+        else:
+            arcname = str(path.relative_to(root_dir))
+            zf.write(path, arcname)
+
+print(f'✓ Created {zip_path}')
+"
+```
+
+Or use the included `SETUP.sh` script (if available).
+
 ## Output convention — generated markdown goes in `.ai_output/`
 
 > **Any markdown file that you (the LLM/agent) are asked to generate — analysis reports, summaries, plans, notes, review documents, etc. — must be written to the `.ai_output/` folder.**
