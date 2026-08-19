@@ -24,6 +24,7 @@ cd "$REPO_ROOT"
 
 # Sync prompt template from action (single source of truth)
 echo "Syncing prompt template from action/scripts/ ..."
+mkdir -p .claude/skills/_impl_pprof_analyzer/prompts
 cp action/scripts/prompts/prompt_template.txt \
    .claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt
 
