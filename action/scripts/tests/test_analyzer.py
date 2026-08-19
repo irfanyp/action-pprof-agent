@@ -401,10 +401,10 @@ class TestNodeBin:
     """Tests for _node_bin() — binary path resolution."""
 
     def test_node_bin_resolves_path(self):
-        """The path is resolved under node_modules/.bin."""
+        """The path is resolved under action/node_modules/.bin."""
         action_path = Path("/tmp/action")
         result = _node_bin("pprof-to-md", action_path)
-        assert result == str(Path("/tmp/action/node_modules/.bin/pprof-to-md"))
+        assert result == str(Path("/tmp/action/action/node_modules/.bin/pprof-to-md"))
 
     def test_node_bin_pprof_to_md(self):
         """Different binary names resolve correctly."""
