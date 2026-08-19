@@ -8,20 +8,33 @@ Analyze Go pprof profiles and generate performance optimization patches using LL
 
 ## 🚀 Quick Navigation
 
-### For Local Analysis (Claude Code)
+### For Local Analysis (Claude Code Skills)
 **👉 [`skill/README.md`](skill/README.md)**
 
-- ⚡ Zero configuration
-- ⏱️ 15-35 seconds per analysis  
-- 🧠 Uses Claude Code's built-in Claude
-- 💻 Single-turn analysis (no agent loop)
-- 📦 Easy to share with teammates
+**Four complementary Claude Code skills for end-to-end performance optimization:**
+
+1. **`pprof-integrator`** — Integrate pprof endpoint into your Go service
+2. **`load-test-generator`** — Generate load test script for realistic profiling
+3. **`profiler-executor`** — Run profiling with concurrent load testing
+4. **`pprof-analyzer`** — Analyze profile and generate performance fixes
 
 ```bash
-unzip pprof-analyzer-skill.zip
-./SETUP.sh install
-/pprof-analyze cpu.prof ./ med
+# Complete workflow (starting from scratch)
+/pprof-integrator ./my-service          # Add pprof endpoint
+/load-test-generator ./my-service       # Generate load test
+/profiler-executor ./my-service         # Capture cpu.prof
+/pprof-analyzer ./my-service --profile .ai_output/cpu.prof --reference med
+
+# Or just analyze an existing profile
+/pprof-analyzer cpu.prof ./ med
 ```
+
+**Features:**
+- ⚡ Zero configuration for analyzer (uses Claude's built-in capabilities)
+- ⏱️ 15-35 seconds per analysis  
+- 🧠 Complete workflow from integration to optimization
+- 💻 Single-turn analysis (no agent loop)
+- 📦 Easy to share with teammates
 
 **Best for:** Developers optimizing code locally
 

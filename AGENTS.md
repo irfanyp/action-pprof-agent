@@ -63,19 +63,26 @@ pprof-analyzer/
 │   └── pprof-analyzer-skill.zip     # Distributable skill package
 ├── .claude/
 │   └── skills/
-│       ├── pprof-analyzer.md        # Claude Code skill definition
-│       └── _impl_pprof_analyzer/
-│           ├── analyzer.py          # Skill orchestration (simplified, no API calls)
-│           ├── requirements.txt     # Python dependencies (GitPython only)
-│           ├── SETUP.sh             # Automatic installation script
-│           ├── INSTALL.md           # Installation guide
-│           ├── README.md            # Skill documentation
-│           ├── prompts/
-│           │   └── prompt_template.txt  # Modified for single-turn analysis
-│           ├── tests/
-│           │   └── test_analyzer.py
-│           └── examples/
-│               └── workflow_example.md
+│       ├── pprof-analyzer.md                  # Claude Code skill: Analyze pprof profiles
+│       ├── pprof-integrator.md               # Claude Code skill: Integrate pprof endpoint
+│       ├── load-test-generator.md            # Claude Code skill: Generate load test
+│       ├── profiler-executor.md              # Claude Code skill: Run profiling + load test
+│       ├── _impl_pprof_analyzer/
+│       │   ├── analyzer.py                   # Main pprof analysis orchestration
+│       │   ├── requirements.txt              # Python dependencies (GitPython only)
+│       │   ├── prompts/
+│       │   │   └── prompt_template.txt       # Single-turn analysis prompt template
+│       │   └── tests/
+│       │       └── test_analyzer.py          # Unit tests
+│       ├── _impl_pprof_integrator/
+│       │   ├── coordinator.py                # Analyze repo + prepare for pprof integration
+│       │   └── requirements.txt              # (stdlib only)
+│       ├── _impl_load_test_generator/
+│       │   ├── coordinator.py                # Analyze endpoints + prepare load test generation
+│       │   └── requirements.txt              # (stdlib only)
+│       └── _impl_profiler_executor/
+│           ├── profiler.py                   # Execute profiling + load test in parallel
+│           └── requirements.txt              # (stdlib only)
 ├── README.md                        # Navigation hub (entry point)
 ├── AGENTS.md                        # This file (developer guidance)
 └── CLAUDE.md                        # Project instructions for AI agents
@@ -105,16 +112,16 @@ The action runs these steps in sequence:
 
 ### Claude Code Skill Flow (.claude/skills/_impl_pprof_analyzer/analyzer.py)
 
-The skill runs these steps locally:
+The skill runs these steps locally (simplified, single-turn analysis):
 
-1. **Validate inputs** — Check profile file, repo path, reference level.
+1. **Validate inputs** — Check profile file, repo path, reference level (no external API keys needed).
 2. **Convert pprof** — Run `pprof-to-md --format detailed` to convert raw profile to markdown.
-3. **Extract hotspots** — Parse markdown to find file paths mentioned in hotspots.
+3. **Extract hotspots** — Parse markdown to find file paths and function names mentioned in hotspots.
 4. **Find Go files** — Use `git ls-files` to enumerate all Go files in repo.
-5. **Smart select files** — Include hotspot files + direct imports, cap at ~75KB of code.
+5. **Smart select files** — Include hotspot files + direct imports (recursively to depth 2), cap at ~75KB of code.
 6. **Read source code** — Read all selected files with line numbers, format as `L{num}| {content}`.
 7. **Build prompt** — Combine reference level instructions + pprof markdown + source code in prompt template.
-8. **Return for analysis** — Return prompt to Claude (Claude Code context; no external API call).
+8. **Return for analysis** — Return prompt + context to Claude (Claude Code will handle the analysis call).
 9. **Extract SUMMARY & PATCH** — Parse Claude's response for `### SUMMARY` and `### PATCH` sections.
 10. **Validate patch** — Run `git apply --check` to dry-run the patch.
 11. **Write artifacts** — Save to `.ai_output/`:
@@ -122,15 +129,102 @@ The skill runs these steps locally:
     - `patch.diff` — Unified diff patch
     - `analyzer_result.md` — Pprof analysis
     - `prompt.txt` — Full prompt sent to Claude
-    - `prompt_for_claude.txt` — Formatted prompt for review
 
 **Key differences from Action:**
-- ✅ No external LLM API calls (uses built-in Claude)
-- ✅ No `read_file` tool loop (all code upfront)
-- ✅ Single-turn analysis (no retries or refinement)
-- ✅ No PR creation (user does it manually)
-- ✅ No SERVICE_URL interaction
-- ✅ No credentials/API keys needed
+- ✅ No external LLM API calls (uses Claude's built-in capabilities in Claude Code)
+- ✅ No `read_file` tool loop (all code read upfront, single-turn analysis)
+- ✅ Single-turn analysis (no retries, no agent loops)
+- ✅ No PR creation (user applies patch manually)
+- ✅ No SERVICE_URL interaction or polling
+- ✅ No credentials/API keys needed (uses Claude Code's native integration)
+- ✅ Simpler, faster execution (no network delays)
+
+**Implementation notes:**
+- Skill takes CLI args: `profile_path`, `repo_path`, `reference_level` (low/med/high)
+- No EnvConfig class (no external API configuration needed)
+- No network calls or polling logic
+- No multi-turn agent loop or tool-use framework
+- Focuses solely on context gathering and prompt construction
+- Claude (in Claude Code context) performs the actual analysis
+
+### Supporting Skills: Complete End-to-End Workflow
+
+Three additional Claude Code skills support the main `pprof-analyzer` skill by handling prerequisites:
+
+#### 1. pprof-integrator (`.claude/skills/_impl_pprof_integrator/`)
+
+**Purpose:** Integrate Go `net/http/pprof` endpoint into a Go service using the guidance from `action/pprof_integration.md`.
+
+**Workflow:**
+1. Detect Go framework in use (net/http, gin, echo, fiber, chi, gRPC, controller-runtime, etc.)
+2. Read `action/pprof_integration.md` to understand integration patterns
+3. Generate code changes for pprof integration
+4. User reviews and applies changes manually (default Claude Code behavior)
+
+**Usage:** `/pprof-integrator /path/to/repo`
+
+**Output:** Go code changes (pprofserver.go, main() modifications) with environment variables `PPROF_PORT`, `PPROF_BIND_ADDR`, `ENABLE_PPROF`.
+
+#### 2. load-test-generator (`.claude/skills/_impl_load_test_generator/`)
+
+**Purpose:** Analyze a Go service and generate a load test script to drive realistic traffic during profiling.
+
+**Workflow:**
+1. Analyze Go service code to identify HTTP endpoints and handlers
+2. Extract request patterns, payloads, typical API usage
+3. Generate load test script (k6, Apache Bench, wrk, or custom Go)
+4. User reviews and runs the load test script
+
+**Usage:** `/load-test-generator /path/to/repo [--tool k6|apache-bench|wrk|go]`
+
+**Output:** Load test script file (e.g., `load_test.js` for k6) that generates sustained load for 30-second profiling window.
+
+#### 3. profiler-executor (`.claude/skills/_impl_profiler_executor/`)
+
+**Purpose:** Execute Go CPU profiling with concurrent load testing to capture realistic performance data.
+
+**Workflow:**
+1. Build the service
+2. Start the service (must have pprof endpoint integrated)
+3. Run profiler and load test in parallel:
+   - **Profiler:** `go tool pprof -text localhost:9987/debug/pprof/profile?seconds=30 > cpu.prof`
+   - **Load test:** Execute provided load test command
+4. Capture `cpu.prof` to `.ai_output/` (ready for `pprof-analyzer`)
+5. Stop the service
+
+**Usage:** `/profiler-executor /path/to/repo [--port 8080] [--load-cmd "k6 run load_test.js"] [--duration 30]`
+
+**Output:** `cpu.prof` file in `.ai_output/` (binary pprof profile)
+
+#### Complete Workflow
+
+```
+User starts with a raw Go service:
+
+1. /pprof-integrator ./my-service
+   ↓ (integrate pprof endpoint)
+   ↓ (user commits changes)
+
+2. /load-test-generator ./my-service
+   ↓ (generate load_test.js)
+   ↓ (user reviews script)
+
+3. /profiler-executor ./my-service --load-cmd "k6 run load_test.js"
+   ↓ (capture cpu.prof with realistic load)
+   ↓ (profile saved to .ai_output/cpu.prof)
+
+4. /pprof-analyzer ./my-service --profile .ai_output/cpu.prof --reference med
+   ↓ (analyze profile, generate performance fixes)
+   ↓ (patch + summary in .ai_output/)
+
+5. User reviews patch and creates PR
+```
+
+**Prerequisites:**
+- Service repository with `go.mod`
+- Go 1.11+ installed
+- `pprof-to-md` available in PATH (installed via action/package.json)
+- Load testing tool for step 2 (k6, wrk, Apache Bench, etc.)
 
 ## Output convention — generated markdown goes in `.ai_output/`
 

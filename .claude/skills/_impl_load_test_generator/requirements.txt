@@ -1,0 +1,2 @@
+# load-test-generator requirements
+# Minimal dependencies - coordinator.py uses only stdlib

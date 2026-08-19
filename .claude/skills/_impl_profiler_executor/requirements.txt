@@ -1,0 +1,2 @@
+# profiler-executor requirements
+# Uses only stdlib for subprocess and process management
