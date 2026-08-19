@@ -912,8 +912,9 @@ def create_pull_request(repo: git.Repo, run_id: str, summary: str, config: EnvCo
     print(f"[1j] Creating branch {branch_name}")
     repo.git.checkout("-b", branch_name)
 
-    # Stage all changes.
+    # Stage all changes except the artifacts directory (generated files for upload, not for commit).
     repo.git.add(A=True)
+    repo.git.reset("artifacts")
 
     # Check if there is anything to commit (patch may have been empty).
     diff = repo.git.diff("--cached")
