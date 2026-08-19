@@ -304,44 +304,15 @@ The [skill/pprof-analyzer-skill.zip](skill/pprof-analyzer-skill.zip) is a distri
 
 **How to regenerate:**
 ```bash
-cd /home/srin/pprof/pprof-analyzer
-python3 -c "
-import zipfile
-import os
-from pathlib import Path
-
-zip_path = Path('skill/pprof-analyzer-skill.zip')
-root_dir = Path('.')
-
-# Files and directories to include in the zip
-includes = [
-    '.claude/skills/',
-    'action/pprof_integration.md',
-    'skill/README.md',
-    'skill/INSTALL.md',
-    'skill/SIMPLIFIED_DESIGN.md',
-    'skill/SKILL_DISTRIBUTION.md',
-    'skill/IMPLEMENTATION_SUMMARY.md',
-]
-
-with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-    for include in includes:
-        path = root_dir / include
-        if path.is_dir():
-            for root, dirs, files in os.walk(path):
-                for file in files:
-                    file_path = Path(root) / file
-                    arcname = str(file_path.relative_to(root_dir))
-                    zf.write(file_path, arcname)
-        else:
-            arcname = str(path.relative_to(root_dir))
-            zf.write(path, arcname)
-
-print(f'✓ Created {zip_path}')
-"
+.claude/skills/build-zip.sh
 ```
 
-Or use the included `SETUP.sh` script (if available).
+This script ([.claude/skills/build-zip.sh](.claude/skills/build-zip.sh)) packages:
+- All skill definitions and implementations (`.claude/skills/`)
+- Integration guide (`action/pprof_integration.md`)
+- Distribution documentation (`skill/*.md`)
+
+Into a single distributable ZIP with compression. It runs from the repository root and updates `skill/pprof-analyzer-skill.zip` in place.
 
 ## Output convention — generated markdown goes in `.ai_output/`
 
