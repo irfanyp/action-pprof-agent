@@ -1,6 +1,7 @@
 ---
 name: pprof-analyzer
 description: Analyze Go pprof profiles and generate performance optimization patches
+command: python3 _impl_pprof_analyzer/analyzer.py
 ---
 
 # pprof-analyzer
