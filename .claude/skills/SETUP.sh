@@ -1,12 +1,20 @@
 #!/bin/bash
 # Setup script for pprof-analyzer skills
-# Installs Claude Code skills and dependencies
+# Installs Claude Code skills and dependencies from the extracted skill package.
+#
+# This script lives inside the extracted pprof-analyzer-skill/ directory and
+# copies the skill files (definitions + implementations) to ~/.claude/skills/.
+# It does NOT depend on a ZIP file — all source files are alongside it.
+#
+# Usage (from inside the extracted pprof-analyzer-skill/ directory):
+#   ./SETUP.sh install
+#   ./SETUP.sh verify
+#   ./SETUP.sh uninstall
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_INSTALL_DIR="${HOME}/.claude/skills"
-ZIP_FILE="${SCRIPT_DIR}/pprof-analyzer-skill.zip"
 
 # Colors for output
 RED='\033[0;31m'
@@ -68,22 +76,22 @@ check_prerequisites() {
     fi
     log_info "✓ git found"
 
-    # Check unzip
-    if ! command -v unzip &> /dev/null; then
-        log_warn "unzip not found, will try Python zipfile module"
-    else
-        log_info "✓ unzip found"
-    fi
-
     return 0
 }
 
 install_skills() {
     log_info "Installing pprof-analyzer skills..."
 
-    # Check if zip file exists
-    if [ ! -f "$ZIP_FILE" ]; then
-        log_error "ZIP file not found: $ZIP_FILE"
+    # Verify the source skill files exist alongside this script
+    local skill_md_count=0
+    for skill in pprof-analyzer pprof-integrator load-test-generator profiler-executor; do
+        if [ -f "$SCRIPT_DIR/${skill}.md" ]; then
+            skill_md_count=$((skill_md_count + 1))
+        fi
+    done
+    if [ $skill_md_count -lt 1 ]; then
+        log_error "No skill definition files (*.md) found in: $SCRIPT_DIR"
+        log_error "Make sure you are running this script from inside the extracted pprof-analyzer-skill/ directory."
         return 1
     fi
 
@@ -91,49 +99,39 @@ install_skills() {
     mkdir -p "$SKILLS_INSTALL_DIR"
     log_info "✓ Created/verified skills directory: $SKILLS_INSTALL_DIR"
 
-    # Extract ZIP file
-    log_info "Extracting skills from ZIP..."
-    if command -v unzip &> /dev/null; then
-        unzip -q -o "$ZIP_FILE" -d "$SKILLS_INSTALL_DIR"
-    else
-        python3 << 'PYTHON_EOF'
-import zipfile
-import sys
-from pathlib import Path
+    # Copy skill definition files
+    log_info "Copying skill definitions..."
+    for skill in pprof-analyzer pprof-integrator load-test-generator profiler-executor; do
+        if [ -f "$SCRIPT_DIR/${skill}.md" ]; then
+            cp "$SCRIPT_DIR/${skill}.md" "$SKILLS_INSTALL_DIR/"
+            log_info "  ✓ ${skill}.md"
+        fi
+    done
 
-zip_path = sys.argv[1]
-extract_dir = sys.argv[2]
+    # Copy implementation directories
+    log_info "Copying skill implementations..."
+    for impl in _impl_pprof_analyzer _impl_pprof_integrator _impl_load_test_generator _impl_profiler_executor; do
+        if [ -d "$SCRIPT_DIR/$impl" ]; then
+            rm -rf "$SKILLS_INSTALL_DIR/$impl"
+            cp -r "$SCRIPT_DIR/$impl" "$SKILLS_INSTALL_DIR/"
+            log_info "  ✓ ${impl}/"
+        fi
+    done
 
-try:
-    with zipfile.ZipFile(zip_path, 'r') as zf:
-        zf.extractall(extract_dir)
-    print(f"Extracted to {extract_dir}")
-except Exception as e:
-    print(f"Error: {e}", file=sys.stderr)
-    sys.exit(1)
-PYTHON_EOF
-        python3 -c "
-import zipfile
-from pathlib import Path
-with zipfile.ZipFile('$ZIP_FILE', 'r') as zf:
-    zf.extractall('$SKILLS_INSTALL_DIR')
-"
+    # Copy pprof_integration.md (referenced by pprof-integrator skill)
+    if [ -f "$SCRIPT_DIR/pprof_integration.md" ]; then
+        mkdir -p "$SKILLS_INSTALL_DIR/_impl_pprof_integrator"
+        cp "$SCRIPT_DIR/pprof_integration.md" "$SKILLS_INSTALL_DIR/_impl_pprof_integrator/"
+        log_info "  ✓ pprof_integration.md"
     fi
-    log_info "✓ Skills extracted to $SKILLS_INSTALL_DIR"
+
+    log_info "✓ All skill files copied to $SKILLS_INSTALL_DIR"
 
     # Install Python dependencies
     log_info "Installing Python dependencies..."
 
-    # Install pprof-analyzer skill dependencies
-    if [ -f "$SKILLS_INSTALL_DIR/_impl_pprof_analyzer/requirements.txt" ]; then
-        pip3 install -q -r "$SKILLS_INSTALL_DIR/_impl_pprof_analyzer/requirements.txt" 2>/dev/null || true
-        log_info "✓ Installed pprof-analyzer dependencies"
-    fi
-
-    # Install other skills (minimal dependencies)
     for skill_dir in "$SKILLS_INSTALL_DIR"/_impl_*/; do
         if [ -f "$skill_dir/requirements.txt" ]; then
-            skill_name=$(basename "$skill_dir")
             pip3 install -q -r "$skill_dir/requirements.txt" 2>/dev/null || true
         fi
     done

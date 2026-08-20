@@ -19,7 +19,8 @@ unzip pprof-analyzer-skill.zip
 cd pprof-analyzer-skill/
 ```
 
-Or if you extracted the contents to a directory:
+This creates a single `pprof-analyzer-skill/` directory containing all files:
+
 ```bash
 ls
 # Should see: SETUP.sh, pprof-analyzer.md, pprof-integrator.md, ...
@@ -57,17 +58,30 @@ You should see:
 
 If you prefer to install manually:
 
-### 1. Extract to Claude Skills Directory
+### 1. Extract the ZIP
 
 ```bash
-# Extract the ZIP to ~/.claude/skills/
-unzip pprof-analyzer-skill.zip -d ~/.claude/skills/
+# Extract the ZIP (creates a pprof-analyzer-skill/ directory)
+unzip pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/
+```
+
+### 2. Copy Skill Files to Claude Skills Directory
+
+```bash
+# Create the skills directory if it doesn't exist
+mkdir -p ~/.claude/skills
+
+# Copy skill definitions and implementations
+cp *.md ~/.claude/skills/
+cp -r _impl_*/ ~/.claude/skills/
+cp pprof_integration.md ~/.claude/skills/_impl_pprof_integrator/
 
 # Verify files are in place
 ls ~/.claude/skills/
 ```
 
-### 2. Install Python Dependencies
+### 3. Install Python Dependencies
 
 ```bash
 # Install GitPython (required for git operations)
@@ -77,14 +91,14 @@ pip3 install GitPython
 pip3 install -r ~/.claude/skills/_impl_pprof_analyzer/requirements.txt
 ```
 
-### 3. Install npm Package
+### 4. Install npm Package
 
 ```bash
 # Install pprof-to-md (required for profile conversion)
 npm install -g pprof-to-md
 ```
 
-### 4. Verify Installation
+### 5. Verify Installation
 
 ```bash
 # Check Python module
