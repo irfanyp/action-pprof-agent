@@ -1,3 +1,8 @@
+---
+name: load-test-generator
+description: Generate load test scripts for Go services
+---
+
 # load-test-generator
 
 Analyzes a Go service and generates a load test script to drive realistic traffic during profiling.

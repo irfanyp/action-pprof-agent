@@ -1,3 +1,8 @@
+---
+name: profiler-executor
+description: Execute Go CPU profiling with concurrent load testing
+---
+
 # profiler-executor
 
 Executes Go CPU profiling with concurrent load testing to capture realistic performance data. Produces `cpu.prof` for analysis by `pprof-analyzer`.

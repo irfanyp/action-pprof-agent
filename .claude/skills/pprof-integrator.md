@@ -1,3 +1,8 @@
+---
+name: pprof-integrator
+description: Integrate Go net/http/pprof profiling endpoint into a service
+---
+
 # pprof-integrator
 
 Integrates Go `net/http/pprof` profiling endpoint into a service using the guidance from `action/pprof_integration.md`.

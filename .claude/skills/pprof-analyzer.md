@@ -1,3 +1,8 @@
+---
+name: pprof-analyzer
+description: Analyze Go pprof profiles and generate performance optimization patches
+---
+
 # pprof-analyzer
 
 Analyze Go pprof profiles and generate performance optimization patches using Claude's analysis.
