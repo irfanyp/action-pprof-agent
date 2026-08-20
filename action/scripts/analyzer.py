@@ -28,13 +28,21 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-
-
+from typing import overload
 
 import git
 import requests
 import tiktoken
+
 from openai import OpenAI
+from openai.types.chat import (
+    ChatCompletionMessageFunctionToolCall,
+    ChatCompletionMessageParam,
+    ChatCompletionToolParam,
+)
+
+
+
 
 # ---------------------------------------------------------------------------
 # Configuration & Constants
@@ -114,12 +122,19 @@ class EnvConfig:
             raise AnalyzerError("init", f"Required env var missing: {name}")
         return value
 
+    @overload
+    def _get_optional(self, name: str, default: None = None) -> str | None: ...
+
+    @overload
+    def _get_optional(self, name: str, default: str) -> str: ...
+
     def _get_optional(self, name: str, default: str | None = None) -> str | None:
         """Get optional env var with default (stripped of whitespace)."""
         value = os.environ.get(name, default)
         if isinstance(value, str):
             return value.strip()
         return value
+
 
     def _get_enum(self, name: str, allowed: set) -> str:
         """Get enum env var, validate against allowed values."""
@@ -195,8 +210,9 @@ def _service_request(
 
 
 def _run_command(
-    cmd: list, step: str, timeout: int = None, error_prefix: str = ""
+    cmd: list, step: str, timeout: int | None = None, error_prefix: str = ""
 ) -> str:
+
     """Run subprocess and raise AnalyzerError on non-zero exit.
 
     Args:
@@ -604,7 +620,12 @@ def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
 # Step 1f — Feed to LLM
 # ---------------------------------------------------------------------------
 
-def call_llm(messages: list[dict], config: EnvConfig, tools: list[dict] | None = None, repo: git.Repo | None = None) -> tuple[str, list[dict]]:
+def call_llm(
+    messages: list[ChatCompletionMessageParam],
+    config: EnvConfig,
+    tools: list[ChatCompletionToolParam] | None = None,
+    repo: git.Repo | None = None,
+) -> tuple[str, list[ChatCompletionMessageParam]]:
     """Call the OpenAI-compatible endpoint with the given conversation.
 
     If tools are provided, enables tool-use and handles tool calls in a loop.
@@ -621,14 +642,20 @@ def call_llm(messages: list[dict], config: EnvConfig, tools: list[dict] | None =
     max_tool_calls = 10
 
     while True:
-        completion = client.chat.completions.create(
-            model=config.ai_model,
-            messages=messages,
-            temperature=0.2,
-            tools=tools if tools else None,
-        )
+        # Build kwargs conditionally so we only pass `tools` when provided.
+        # The OpenAI SDK uses a NotGiven sentinel for omitted params; passing
+        # None is rejected by the type checker.
+        kwargs: dict = {
+            "model": config.ai_model,
+            "messages": messages,
+            "temperature": 0.2,
+        }
+        if tools:
+            kwargs["tools"] = tools
+        completion = client.chat.completions.create(**kwargs)
 
         assistant_message = completion.choices[0].message
+
         text = assistant_message.content or ""
 
         # If no tools, return the text response
@@ -636,23 +663,33 @@ def call_llm(messages: list[dict], config: EnvConfig, tools: list[dict] | None =
             print(f"[1f] LLM returned {len(text)} chars.")
             return text, messages
 
-        # Handle tool calls
+        # Handle tool calls — filter to function tool calls (the only type we support).
         tool_calls = assistant_message.tool_calls
         print(f"[1f] LLM made {len(tool_calls)} tool call(s).")
 
         # Add the assistant's response (with tool calls) to the conversation
-        assistant_msg = {
+        assistant_msg: ChatCompletionMessageParam = {
             "role": "assistant",
             "content": text,
             "tool_calls": [
-                {"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                {
+                    "id": tc.id,
+                    "type": tc.type,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
                 for tc in tool_calls
-            ]
+                if isinstance(tc, ChatCompletionMessageFunctionToolCall)
+            ],
         }
         messages.append(assistant_msg)
 
         # Process each tool call and add tool responses
         for i, tool_call in enumerate(tool_calls, 1):
+            if not isinstance(tool_call, ChatCompletionMessageFunctionToolCall):
+                continue
             tool_name = tool_call.function.name
             tool_input = tool_call.function.arguments
             tool_id = tool_call.id
@@ -678,6 +715,7 @@ def call_llm(messages: list[dict], config: EnvConfig, tools: list[dict] | None =
             raise AnalyzerError("1f", f"Tool calls exceeded limit ({max_tool_calls}). LLM may be in an infinite loop.")
 
 
+
 def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> str:
     """Execute the read_file tool request.
 
@@ -701,7 +739,7 @@ def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> st
             params = tool_input
 
         file_path = params.get("file_path", params.get("path", ""))
-        line_range = params.get("line_range")
+        raw_line_range = params.get("line_range")
 
         if not file_path:
             return "ERROR: No file_path provided. Use 'file_path' key in arguments."
@@ -711,15 +749,20 @@ def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> st
             return f"ERROR: Invalid file path '{file_path}' — directory traversal not allowed"
 
         # Parse line_range if provided as string "100-150"
-        if isinstance(line_range, str) and '-' in line_range:
+        line_range: tuple[int, int] | None = None
+        if isinstance(raw_line_range, str):
+            if '-' not in raw_line_range:
+                return f"ERROR: Invalid line_range format '{raw_line_range}'. Use 'start-end' format (e.g., '100-150')"
             try:
-                start, end = line_range.split('-')
+                start, end = raw_line_range.split('-')
                 line_range = (int(start.strip()), int(end.strip()))
             except ValueError:
-                return f"ERROR: Invalid line_range format '{line_range}'. Use 'start-end' format (e.g., '100-150')"
+                return f"ERROR: Invalid line_range format '{raw_line_range}'. Use 'start-end' format (e.g., '100-150')"
+
 
         result = read_file_context(file_path, line_range, repo)
         return result
+
     except Exception as e:
         # Return detailed error messages to help LLM correct its requests
         import traceback
@@ -736,9 +779,10 @@ def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> st
 # Step 1g — Extract git patch from LLM result
 # ---------------------------------------------------------------------------
 
-def create_read_file_tool() -> dict:
+def create_read_file_tool() -> ChatCompletionToolParam:
     """Create the read_file tool definition for the LLM."""
     return {
+
         "type": "function",
         "function": {
             "name": "read_file",
@@ -825,12 +869,13 @@ def generate_valid_patch(prompt: str, config: EnvConfig, repo: git.Repo | None =
     Returns (summary, patch, llm_result) from the first attempt whose patch
     checks out cleanly. Raises AnalyzerError("1h") if no attempt succeeds.
     """
-    messages = [
+    messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": "You are a performance engineering assistant that produces git patches. Use the read_file tool to examine code when needed, then produce a SUMMARY and PATCH."},
         {"role": "user", "content": prompt},
     ]
 
     tool_definition = create_read_file_tool()
+
     last_error = "unknown error"
 
     for attempt in range(1, Config.MAX_PATCH_ATTEMPTS + 1):
@@ -1050,10 +1095,15 @@ def main() -> int:
     # --- Steps 1b-1j (wrapped for error flagging) ---------------------------
     try:
         # 1b — obtain raw pprof profile (poll SERVICE_URL, or load from file)
-        if file_mode:
+        # Use a truthy check (not `is not None`) so that an empty string is
+        # treated the same as None — matching the `bool()` used for file_mode.
+        # Pylance narrows str|None to str after a truthy check.
+        if config.analyzer_result_file:
             pprof_path = load_analyzer_result_from_file(config.analyzer_result_file)
         else:
             pprof_path = poll_analyzer_result(run_id, config)
+
+
 
         # Convert the raw pprof profile to LLM-friendly markdown via
         # pprof-to-md. The markdown replaces the old JSON analyzer result.

@@ -372,6 +372,7 @@ def main() -> int:
         repo = git.Repo(repo_path)
     except git.InvalidGitRepositoryError:
         error(f"Not a git repository: {repo_path}")
+        return 1  # error() calls sys.exit(1); this satisfies type checkers
 
     # Step 3: Extract hotspot files and smart-select
     hotspot_files = extract_hotspot_files(analyzer_result)
