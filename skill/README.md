@@ -51,6 +51,8 @@ git apply .ai_output/patch.diff
 ### Install (Automatic)
 
 ```bash
+unzip pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/
 ./SETUP.sh install
 ```
 
@@ -123,6 +125,8 @@ This skill uses a **single-turn approach**:
 ### Quick Install
 
 ```bash
+unzip pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/
 ./SETUP.sh install
 ```
 
@@ -434,17 +438,17 @@ The GitHub Action variant (if using external LLM services) would have API costs,
 The entire skill is portable and can be shared with teammates:
 
 ```bash
-# Create a distribution package
-zip -r pprof-analyzer-skill.zip \
-  .claude/skills/pprof-analyzer.md \
-  .claude/skills/_impl_pprof_analyzer/ \
-  examples/ \
-  INSTALL.md \
-  README.md \
-  SETUP.sh
+# Share the pre-built zip file (skill/pprof-analyzer-skill.zip)
+# Each teammate can extract and install:
+unzip pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/
+./SETUP.sh install
+```
 
-# Share the zip file
-# Each teammate can extract and run: ./SETUP.sh install
+To rebuild the ZIP after making changes, run from the repository root:
+
+```bash
+.claude/skills/build-zip.sh
 ```
 
 ## Development

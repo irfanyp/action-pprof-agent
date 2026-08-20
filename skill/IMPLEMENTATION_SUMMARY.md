@@ -8,27 +8,23 @@ Successfully created a complete, production-ready Claude skill that analyzes Go 
 
 ### 1. Core Skill Files
 
-**Location:** `~/.claude/skills/`
+**Location:** `~/.claude/skills/` (after installation)
 
 ```
 pprof-analyzer.md                  # Skill definition (human-readable)
 _impl_pprof_analyzer/              # Implementation directory
   ├── analyzer.py                  # Main orchestration script (executable)
-  ├── prompt_template.txt          # Claude prompt (single-turn, no tool-use)
+  ├── prompts/prompt_template.txt # Claude prompt (single-turn, no tool-use)
   ├── requirements.txt             # Python dependencies
   ├── package.json                 # Node.js dependencies
-  ├── tests/test_analyzer.py       # Unit tests
-  ├── examples/workflow_example.md # Usage example
-  ├── INSTALL.md                   # Installation guide
-  ├── README.md                    # Full documentation
-  └── SETUP.sh                     # Installation automation script
+  └── tests/test_analyzer.py       # Unit tests
 ```
 
 ### 2. Distribution Package
 
-**File:** `pprof-analyzer-skill.zip` (23.3 KB)
+**File:** `pprof-analyzer-skill.zip`
 
-Contains everything needed to install the skill on any machine with Python 3.11+, Node.js, and git.
+Extracts into a single flat `pprof-analyzer-skill/` directory containing everything needed to install the skill on any machine with Python 3.11+, Node.js, and git. See [SKILL_DISTRIBUTION.md](SKILL_DISTRIBUTION.md) for the full package contents listing.
 
 ### 3. Documentation
 
@@ -233,14 +229,15 @@ All production-grade, actively maintained libraries.
 ### For a Single User
 
 ```bash
-# Extract
+# Extract (creates a pprof-analyzer-skill/ directory)
 unzip pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/
 
 # Install (automated)
 ./SETUP.sh install
 
 # Verify
-/pprof-analyze --help
+./SETUP.sh verify
 ```
 
 ### For a Team
@@ -249,6 +246,7 @@ unzip pprof-analyzer-skill.zip
 # Host the zip somewhere (GitHub, Slack, shared drive)
 # Each teammate:
 unzip pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/
 ./SETUP.sh install
 
 # Now everyone has: /pprof-analyze
@@ -391,14 +389,15 @@ python3 ~/.claude/skills/_impl_pprof_analyzer/analyzer.py \
 
 1. **Download:** `pprof-analyzer-skill.zip`
 2. **Extract:** `unzip pprof-analyzer-skill.zip`
-3. **Install:** `./SETUP.sh install`
-4. **Use:** `/pprof-analyze cpu.prof ./ med`
-5. **Share:** Send zip to teammates, they run `./SETUP.sh install`
+3. **Enter:** `cd pprof-analyzer-skill/`
+4. **Install:** `./SETUP.sh install`
+5. **Use:** `/pprof-analyze cpu.prof ./ med`
+6. **Share:** Send zip to teammates, they run `cd pprof-analyzer-skill/ && ./SETUP.sh install`
 
 ## Questions & Support
 
 **Q: How do I install for my team?**  
-A: Share `pprof-analyzer-skill.zip`. Each teammate runs `./SETUP.sh install`.
+A: Share `pprof-analyzer-skill.zip`. Each teammate extracts it, enters the directory, and runs `./SETUP.sh install`.
 
 **Q: What if the patch doesn't apply?**  
 A: Check `.ai_output/prompt.txt` to see what Claude received. Try different reference level or model.

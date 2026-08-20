@@ -99,6 +99,7 @@ Now: **Single, clear workflow**
 ### Installation
 ```bash
 unzip pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/
 ./SETUP.sh install
 ```
 
@@ -300,6 +301,7 @@ A: Review `.ai_output/prompt.txt` to see what Claude received. Try a different r
 1. **Extract & Install**
    ```bash
    unzip pprof-analyzer-skill.zip
+   cd pprof-analyzer-skill/
    ./SETUP.sh install
    ```
 
@@ -311,7 +313,10 @@ A: Review `.ai_output/prompt.txt` to see what Claude received. Try a different r
 3. **Share with Teammates**
    ```bash
    # Send them the zip file
-   # They run: ./SETUP.sh install
+   # They run:
+   unzip pprof-analyzer-skill.zip
+   cd pprof-analyzer-skill/
+   ./SETUP.sh install
    ```
 
 ---

@@ -8,23 +8,40 @@ The `pprof-analyzer-skill.zip` contains a complete, ready-to-use Claude skill fo
 
 ### Package Contents
 
+The ZIP extracts into a single flat `pprof-analyzer-skill/` directory:
+
 ```
 pprof-analyzer-skill.zip
-├── pprof-analyzer.md                  # Skill definition (register in Claude Code)
-└── _impl_pprof_analyzer/
-    ├── analyzer.py                    # Main orchestration script (executable)
+└── pprof-analyzer-skill/
     ├── SETUP.sh                       # Installation helper script (executable)
-    ├── INSTALL.md                     # Detailed installation instructions
+    ├── pprof-analyzer.md              # Skill definition (register in Claude Code)
+    ├── pprof-integrator.md            # Skill definition
+    ├── load-test-generator.md         # Skill definition
+    ├── profiler-executor.md           # Skill definition
+    ├── pprof_integration.md           # Go pprof integration guide
     ├── README.md                      # Complete documentation
-    ├── package.json                   # Node.js dependencies (pprof-to-md)
-    ├── requirements.txt               # Python dependencies
-    ├── prompts/
-    │   └── prompt_template.txt        # Claude prompt template
-    ├── tests/
-    │   └── test_analyzer.py           # Unit tests
-    └── examples/
-        ├── workflow_example.md        # Step-by-step usage example
-        └── .gitkeep
+    ├── INSTALL.md                      # Detailed installation instructions
+    ├── SIMPLIFIED_DESIGN.md           # Design decisions and rationale
+    ├── SKILL_DISTRIBUTION.md          # This file (sharing/distribution info)
+    ├── IMPLEMENTATION_SUMMARY.md      # Technical details
+    ├── _impl_pprof_analyzer/
+    │   ├── analyzer.py                # Main orchestration script
+    │   ├── package.json               # Node.js dependencies (pprof-to-md)
+    │   ├── requirements.txt           # Python dependencies
+    │   ├── prompts/
+    │   │   └── prompt_template.txt    # Claude prompt template
+    │   └── tests/
+    │       └── test_analyzer.py       # Unit tests
+    ├── _impl_pprof_integrator/
+    │   ├── coordinator.py
+    │   ├── requirements.txt
+    │   └── pprof_integration.md
+    ├── _impl_load_test_generator/
+    │   ├── coordinator.py
+    │   └── requirements.txt
+    └── _impl_profiler_executor/
+        ├── profiler.py
+        └── requirements.txt
 ```
 
 ## Quick Start (30 seconds)
@@ -179,6 +196,7 @@ The skill is portable and self-contained:
 # Share the zip file
 # Each teammate extracts and installs:
 unzip pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/
 ./SETUP.sh install
 
 # Now everyone has: /pprof-analyze
