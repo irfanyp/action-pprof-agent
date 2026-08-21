@@ -16,6 +16,9 @@ repomix-output/
 # unzipped skill based on readme
 skill/pprof-analyzer-skill
 
+# built skill distribution zip is now a release artifact, not committed
+skill/pprof-analyzer-skill.zip
+
 # IDE / tooling
 .workspace_rag/
 .vscode/
