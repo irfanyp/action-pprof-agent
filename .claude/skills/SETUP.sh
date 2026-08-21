@@ -82,15 +82,15 @@ check_prerequisites() {
 install_skills() {
     log_info "Installing pprof-analyzer skills..."
 
-    # Verify the source skill files exist alongside this script
-    local skill_md_count=0
+    # Verify the source skill directories exist alongside this script
+    local skill_count=0
     for skill in pprof-analyzer pprof-integrator load-test-generator profiler-executor; do
-        if [ -f "$SCRIPT_DIR/${skill}.md" ]; then
-            skill_md_count=$((skill_md_count + 1))
+        if [ -f "$SCRIPT_DIR/$skill/SKILL.md" ]; then
+            skill_count=$((skill_count + 1))
         fi
     done
-    if [ $skill_md_count -lt 1 ]; then
-        log_error "No skill definition files (*.md) found in: $SCRIPT_DIR"
+    if [ $skill_count -lt 1 ]; then
+        log_error "No skill directories (<name>/SKILL.md) found in: $SCRIPT_DIR"
         log_error "Make sure you are running this script from inside the extracted pprof-analyzer-skill/ directory."
         return 1
     fi
@@ -99,38 +99,23 @@ install_skills() {
     mkdir -p "$SKILLS_INSTALL_DIR"
     log_info "✓ Created/verified skills directory: $SKILLS_INSTALL_DIR"
 
-    # Copy skill definition files
-    log_info "Copying skill definitions..."
+    # Copy each skill directory (SKILL.md + implementation files) as a whole
+    log_info "Copying skills..."
     for skill in pprof-analyzer pprof-integrator load-test-generator profiler-executor; do
-        if [ -f "$SCRIPT_DIR/${skill}.md" ]; then
-            cp "$SCRIPT_DIR/${skill}.md" "$SKILLS_INSTALL_DIR/"
-            log_info "  ✓ ${skill}.md"
+        if [ -d "$SCRIPT_DIR/$skill" ]; then
+            rm -rf "$SKILLS_INSTALL_DIR/$skill"
+            cp -r "$SCRIPT_DIR/$skill" "$SKILLS_INSTALL_DIR/"
+            log_info "  ✓ ${skill}/"
         fi
     done
-
-    # Copy implementation directories
-    log_info "Copying skill implementations..."
-    for impl in _impl_pprof_analyzer _impl_pprof_integrator _impl_load_test_generator _impl_profiler_executor; do
-        if [ -d "$SCRIPT_DIR/$impl" ]; then
-            rm -rf "$SKILLS_INSTALL_DIR/$impl"
-            cp -r "$SCRIPT_DIR/$impl" "$SKILLS_INSTALL_DIR/"
-            log_info "  ✓ ${impl}/"
-        fi
-    done
-
-    # Copy pprof_integration.md (referenced by pprof-integrator skill)
-    if [ -f "$SCRIPT_DIR/pprof_integration.md" ]; then
-        mkdir -p "$SKILLS_INSTALL_DIR/_impl_pprof_integrator"
-        cp "$SCRIPT_DIR/pprof_integration.md" "$SKILLS_INSTALL_DIR/_impl_pprof_integrator/"
-        log_info "  ✓ pprof_integration.md"
-    fi
 
     log_info "✓ All skill files copied to $SKILLS_INSTALL_DIR"
 
     # Install Python dependencies
     log_info "Installing Python dependencies..."
 
-    for skill_dir in "$SKILLS_INSTALL_DIR"/_impl_*/; do
+    for skill in pprof-analyzer pprof-integrator load-test-generator profiler-executor; do
+        skill_dir="$SKILLS_INSTALL_DIR/$skill"
         if [ -f "$skill_dir/requirements.txt" ]; then
             pip3 install -q -r "$skill_dir/requirements.txt" 2>/dev/null || true
         fi
@@ -139,7 +124,7 @@ install_skills() {
 
     # Install npm dependencies for pprof-to-md
     if command -v npm &> /dev/null; then
-        if [ -f "$SKILLS_INSTALL_DIR/_impl_pprof_analyzer/package.json" ]; then
+        if [ -f "$SKILLS_INSTALL_DIR/pprof-analyzer/package.json" ]; then
             log_info "Installing npm dependencies (pprof-to-md)..."
             npm install -g pprof-to-md > /dev/null 2>&1 || {
                 log_warn "Failed to install pprof-to-md globally"
@@ -163,16 +148,10 @@ uninstall_skills() {
         return 0
     fi
 
-    # Remove skill definition files
+    # Remove skill directories
     for skill in pprof-analyzer pprof-integrator load-test-generator profiler-executor; do
-        rm -f "$SKILLS_INSTALL_DIR/${skill}.md"
+        rm -rf "$SKILLS_INSTALL_DIR/$skill"
     done
-
-    # Remove implementation directories
-    rm -rf "$SKILLS_INSTALL_DIR/_impl_pprof_analyzer"
-    rm -rf "$SKILLS_INSTALL_DIR/_impl_pprof_integrator"
-    rm -rf "$SKILLS_INSTALL_DIR/_impl_load_test_generator"
-    rm -rf "$SKILLS_INSTALL_DIR/_impl_profiler_executor"
 
     log_info "✓ Skills uninstalled from $SKILLS_INSTALL_DIR"
     return 0
@@ -186,25 +165,14 @@ verify_installation() {
         return 1
     fi
 
-    # Check skill definitions
+    # Check skill directories (SKILL.md must be present for Claude Code to detect them)
     local skill_count=0
     for skill in pprof-analyzer pprof-integrator load-test-generator profiler-executor; do
-        if [ -f "$SKILLS_INSTALL_DIR/${skill}.md" ]; then
-            log_info "✓ Found skill: ${skill}"
+        if [ -f "$SKILLS_INSTALL_DIR/$skill/SKILL.md" ]; then
+            log_info "✓ Found skill: ${skill} (${skill}/SKILL.md)"
             skill_count=$((skill_count + 1))
         else
-            log_warn "Missing skill: ${skill}"
-        fi
-    done
-
-    # Check implementations
-    local impl_count=0
-    for impl in _impl_pprof_analyzer _impl_pprof_integrator _impl_load_test_generator _impl_profiler_executor; do
-        if [ -d "$SKILLS_INSTALL_DIR/$impl" ]; then
-            log_info "✓ Found implementation: ${impl}"
-            impl_count=$((impl_count + 1))
-        else
-            log_warn "Missing implementation: ${impl}"
+            log_warn "Missing skill: ${skill} (expected ${skill}/SKILL.md)"
         fi
     done
 
@@ -223,11 +191,11 @@ verify_installation() {
         log_warn "Install with: npm install -g pprof-to-md"
     fi
 
-    if [ $skill_count -eq 4 ] && [ $impl_count -eq 4 ]; then
+    if [ $skill_count -eq 4 ]; then
         log_info "✓ All 4 skills installed and verified"
         return 0
     else
-        log_error "Installation incomplete (found $skill_count skills, $impl_count implementations)"
+        log_error "Installation incomplete (found $skill_count/4 skills)"
         return 1
     fi
 }

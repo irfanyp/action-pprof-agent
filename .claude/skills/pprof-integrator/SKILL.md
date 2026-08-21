@@ -1,7 +1,7 @@
 ---
 name: pprof-integrator
 description: Integrate Go net/http/pprof profiling endpoint into a service
-command: python3 _impl_pprof_integrator/coordinator.py
+command: python3 coordinator.py
 ---
 
 # pprof-integrator
