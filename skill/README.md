@@ -457,7 +457,7 @@ To rebuild the ZIP after making changes, run from the repository root:
 
 ```bash
 pip install pytest
-pytest .claude/skills/_impl_pprof_analyzer/tests/
+pytest .claude/skills/pprof-analyzer/tests/
 ```
 
 ### Adding Features

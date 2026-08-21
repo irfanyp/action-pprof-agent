@@ -24,22 +24,23 @@ pprof-analyzer-skill.zip
     ├── SIMPLIFIED_DESIGN.md           # Design decisions and rationale
     ├── SKILL_DISTRIBUTION.md          # This file (sharing/distribution info)
     ├── IMPLEMENTATION_SUMMARY.md      # Technical details
-    ├── _impl_pprof_analyzer/
+    ├── pprof-analyzer/
     │   ├── analyzer.py                # Main orchestration script
     │   ├── package.json               # Node.js dependencies (pprof-to-md)
     │   ├── requirements.txt           # Python dependencies
+    │   ├── SKILL.md                   # Skill metadata
     │   ├── prompts/
     │   │   └── prompt_template.txt    # Claude prompt template
     │   └── tests/
     │       └── test_analyzer.py       # Unit tests
-    ├── _impl_pprof_integrator/
+    ├── pprof-integrator/
     │   ├── coordinator.py
     │   ├── requirements.txt
-    │   └── pprof_integration.md
-    ├── _impl_load_test_generator/
+    │   └── SKILL.md
+    ├── load-test-generator/
     │   ├── coordinator.py
     │   └── requirements.txt
-    └── _impl_profiler_executor/
+    └── profiler-executor/
         ├── profiler.py
         └── requirements.txt
 ```
@@ -249,7 +250,7 @@ Unit tests for:
 - File selection logic
 - Hotspot extraction
 
-Run with: `pytest _impl_pprof_analyzer/tests/`
+Run with: `pytest pprof-analyzer/tests/`
 
 ## Advanced Usage
 
@@ -301,7 +302,7 @@ Use in your GitHub workflow:
 ### Running Tests
 
 ```bash
-cd _impl_pprof_analyzer
+cd pprof-analyzer
 pytest tests/
 ```
 

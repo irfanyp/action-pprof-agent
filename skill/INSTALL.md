@@ -74,8 +74,8 @@ mkdir -p ~/.claude/skills
 
 # Copy skill definitions and implementations
 cp *.md ~/.claude/skills/
-cp -r _impl_*/ ~/.claude/skills/
-cp pprof_integration.md ~/.claude/skills/_impl_pprof_integrator/
+cp -r pprof-analyzer/ pprof-integrator/ load-test-generator/ profiler-executor/ ~/.claude/skills/
+cp pprof_integration.md ~/.claude/skills/pprof-integrator/
 
 # Verify files are in place
 ls ~/.claude/skills/
@@ -88,7 +88,7 @@ ls ~/.claude/skills/
 pip3 install GitPython
 
 # Or use the provided requirements
-pip3 install -r ~/.claude/skills/_impl_pprof_analyzer/requirements.txt
+pip3 install -r ~/.claude/skills/pprof-analyzer/requirements.txt
 ```
 
 ### 4. Install npm Package
@@ -165,13 +165,13 @@ To remove the skills:
 Or manually:
 ```bash
 rm -rf ~/.claude/skills/pprof-analyzer.md
-rm -rf ~/.claude/skills/_impl_pprof_analyzer/
+rm -rf ~/.claude/skills/pprof-analyzer/
 rm -rf ~/.claude/skills/pprof-integrator.md
-rm -rf ~/.claude/skills/_impl_pprof_integrator/
+rm -rf ~/.claude/skills/pprof-integrator/
 rm -rf ~/.claude/skills/load-test-generator.md
-rm -rf ~/.claude/skills/_impl_load_test_generator/
+rm -rf ~/.claude/skills/load-test-generator/
 rm -rf ~/.claude/skills/profiler-executor.md
-rm -rf ~/.claude/skills/_impl_profiler_executor/
+rm -rf ~/.claude/skills/profiler-executor/
 ```
 
 ## Usage After Installation
@@ -250,15 +250,16 @@ After installation, skills are located at:
 ├── pprof-integrator.md
 ├── load-test-generator.md
 ├── profiler-executor.md
-├── _impl_pprof_analyzer/
+├── pprof-analyzer/
 │   ├── analyzer.py
 │   ├── requirements.txt
 │   ├── package.json
+│   ├── SKILL.md
 │   ├── prompts/
 │   └── tests/
-├── _impl_pprof_integrator/
-├── _impl_load_test_generator/
-└── _impl_profiler_executor/
+├── pprof-integrator/
+├── load-test-generator/
+└── profiler-executor/
 ```
 
 ## Support
