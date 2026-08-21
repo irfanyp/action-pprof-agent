@@ -15,7 +15,7 @@ A reusable GitHub Action that:
 5. Extracts a unified-diff patch from the LLM response and applies it with `git apply`.
 6. Creates a branch, commits, pushes, and opens a Pull Request via `gh`.
 
-### 2. Claude Code Skill (.claude/skills/_impl_pprof_analyzer/)
+### 2. Claude Code Skill (.claude/skills/pprof-analyzer/)
 A Claude Code skill that analyzes pprof profiles locally:
 1. Reads pprof profile from file.
 2. Converts the raw profile to LLM-friendly markdown via `pprof-to-md`.
@@ -32,61 +32,7 @@ See [`README.md`](README.md) for detailed flow of both implementations.
 
 ## Key files & structure
 
-```
-pprof-analyzer/
-├── action.yml                       # Composite action definition (GitHub Action, at root)
-├── .github/
-│   ├── dependabot.yml               # Auto-updates: github-actions, pip, npm
-│   └── workflows/test.yml           # CI test workflow
-├── action/
-│   ├── action.yml                   # (see: action.yml at root, kept for reference)
-│   ├── scripts/
-│   │   ├── analyzer.py              # GitHub Action orchestration (steps 1a–1k)
-│   │   ├── requirements.txt         # Python dependencies (openai, GitPython, requests)
-│   │   ├── requirements-dev.txt     # Python dev/test dependencies
-│   │   ├── prompts/
-│   │   │   └── prompt_template.txt  # LLM prompt template
-│   │   └── tests/
-│   │       ├── conftest.py          # Pytest fixtures
-│   │       └── test_analyzer.py     # Unit tests
-│   ├── package.json                 # Pinned npm tooling (pprof-to-md)
-│   ├── package-lock.json            # Reproducible npm installs (npm ci)
-│   ├── pprof_integration.md         # Guide for integrating pprof into Go services
-│   ├── README.md                    # GitHub Action documentation
-│   └── examples/
-│       └── workflow.yml             # Example GitHub Action workflow
-├── skill/
-│   ├── README.md                    # Skill distribution documentation
-│   ├── SIMPLIFIED_DESIGN.md         # Design decisions for the skill
-│   ├── SKILL_DISTRIBUTION.md        # How to share the skill
-│   ├── IMPLEMENTATION_SUMMARY.md    # Technical details
-│   └── pprof-analyzer-skill.zip     # Distributable skill package
-├── .claude/
-│   └── skills/
-│       ├── pprof-analyzer.md                  # Claude Code skill: Analyze pprof profiles
-│       ├── pprof-integrator.md               # Claude Code skill: Integrate pprof endpoint
-│       ├── load-test-generator.md            # Claude Code skill: Generate load test
-│       ├── profiler-executor.md              # Claude Code skill: Run profiling + load test
-│       ├── _impl_pprof_analyzer/
-│       │   ├── analyzer.py                   # Main pprof analysis orchestration
-│       │   ├── requirements.txt              # Python dependencies (GitPython only)
-│       │   ├── prompts/
-│       │   │   └── prompt_template.txt       # Single-turn analysis prompt template
-│       │   └── tests/
-│       │       └── test_analyzer.py          # Unit tests
-│       ├── _impl_pprof_integrator/
-│       │   ├── coordinator.py                # Analyze repo + prepare for pprof integration
-│       │   └── requirements.txt              # (stdlib only)
-│       ├── _impl_load_test_generator/
-│       │   ├── coordinator.py                # Analyze endpoints + prepare load test generation
-│       │   └── requirements.txt              # (stdlib only)
-│       └── _impl_profiler_executor/
-│           ├── profiler.py                   # Execute profiling + load test in parallel
-│           └── requirements.txt              # (stdlib only)
-├── README.md                        # Navigation hub (entry point)
-├── AGENTS.md                        # This file (developer guidance)
-└── CLAUDE.md                        # Project instructions for AI agents
-```
+**Skill implementations** live in `.claude/skills/<name>/` directories (e.g., `pprof-analyzer/`, `load-test-generator/`), each with a `SKILL.md` definition and Python implementation files. The **GitHub Action** code is in `action/scripts/analyzer.py`, with test fixtures in `action/scripts/tests/`. Example workflows and integration guides are in `action/` and `skill/` directories. See [README.md](README.md) for the entry point and [action/README.md](action/README.md) for GitHub Action documentation.
 
 ## Implementation Flows
 
@@ -110,7 +56,7 @@ The action runs these steps in sequence:
 
 **When `analyzer_result_file` is set (file mode):** Skip steps 1a, 1b (service polling), 1k, and 2a (no service interaction). Load profile from file instead. Generate local `run_id` (form: `local-<timestamp>`).
 
-### Claude Code Skill Flow (.claude/skills/_impl_pprof_analyzer/analyzer.py)
+### Claude Code Skill Flow (.claude/skills/pprof-analyzer/analyzer.py)
 
 The skill runs these steps locally (simplified, single-turn analysis):
 
@@ -151,7 +97,7 @@ The skill runs these steps locally (simplified, single-turn analysis):
 
 Three additional Claude Code skills support the main `pprof-analyzer` skill by handling prerequisites:
 
-#### 1. pprof-integrator (`.claude/skills/_impl_pprof_integrator/`)
+#### 1. pprof-integrator (`.claude/skills/pprof-integrator/`)
 
 **Purpose:** Integrate Go `net/http/pprof` endpoint into a Go service using the guidance from `action/pprof_integration.md`.
 
@@ -165,7 +111,7 @@ Three additional Claude Code skills support the main `pprof-analyzer` skill by h
 
 **Output:** Go code changes (pprofserver.go, main() modifications) with environment variables `PPROF_PORT`, `PPROF_BIND_ADDR`, `ENABLE_PPROF`.
 
-#### 2. load-test-generator (`.claude/skills/_impl_load_test_generator/`)
+#### 2. load-test-generator (`.claude/skills/load-test-generator/`)
 
 **Purpose:** Analyze a Go service and generate a load test script to drive realistic traffic during profiling.
 
@@ -179,7 +125,7 @@ Three additional Claude Code skills support the main `pprof-analyzer` skill by h
 
 **Output:** Load test script file (e.g., `load_test.js` for k6) that generates sustained load for 30-second profiling window.
 
-#### 3. profiler-executor (`.claude/skills/_impl_profiler_executor/`)
+#### 3. profiler-executor (`.claude/skills/profiler-executor/`)
 
 **Purpose:** Execute Go CPU profiling with concurrent load testing to capture realistic performance data.
 
@@ -228,7 +174,7 @@ User starts with a raw Go service:
 
 ## Synchronization between Action and Skill implementations
 
-The two implementations ([action/scripts/analyzer.py](action/scripts/analyzer.py) and [.claude/skills/_impl_pprof_analyzer/analyzer.py](.claude/skills/_impl_pprof_analyzer/analyzer.py)) are **intentionally different** but share some common logic and patterns. This section clarifies when changes in one should be reflected in the other.
+The two implementations ([action/scripts/analyzer.py](action/scripts/analyzer.py) and [.claude/skills/pprof-analyzer/analyzer.py](.claude/skills/pprof-analyzer/analyzer.py)) are **intentionally different** but share some common logic and patterns. This section clarifies when changes in one should be reflected in the other.
 
 ### Intentional design differences
 
@@ -240,7 +186,7 @@ The two implementations ([action/scripts/analyzer.py](action/scripts/analyzer.py
 - Handles polling, error flagging, step status tracking
 - Requires: `openai`, `requests`, `tiktoken`, `GitPython`
 
-**Claude Code Skill (.claude/skills/_impl_pprof_analyzer/analyzer.py):**
+**Claude Code Skill (.claude/skills/pprof-analyzer/analyzer.py):**
 - Local context gathering only (424 lines)
 - No external LLM API calls
 - Reads all code upfront using `smart_select_files()`
@@ -255,7 +201,7 @@ These elements appear in both files and should stay synchronized:
 1. **Regex patterns** — For parsing LLM responses:
    - `PATCH_FENCE_PATTERN = r"```(?:diff[a-z-]*)?\n(.*?)```"`
    - `SUMMARY_PATTERN = r"###\s*SUMMARY\s*\n(.*?)(?:###\s*PATCH|\Z)"`
-   - Location: `Config.PATCH_FENCE_PATTERN` (action), `SkillConfig.PATCH_FENCE_PATTERN` (skill)
+   - Location: `Config.PATCH_FENCE_PATTERN` (action/scripts/analyzer.py), same in `.claude/skills/pprof-analyzer/analyzer.py`
    - Reason: Both parse SUMMARY/PATCH structure from LLM responses; must match exactly
 
 2. **Reference levels** — Valid values for profiling depth:
@@ -288,7 +234,7 @@ These elements appear in both files and should stay synchronized:
 
 **Prompt template (single source of truth):**
 - **Source**: [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt) is the **canonical version**
-- **Sync mechanism**: [.claude/skills/build-zip.sh](.claude/skills/build-zip.sh) automatically copies it to [.claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt](.claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt) before creating the ZIP
+- **Sync mechanism**: [.claude/skills/build-zip.sh](.claude/skills/build-zip.sh) automatically copies it to [.claude/skills/pprof-analyzer/prompts/prompt_template.txt](.claude/skills/pprof-analyzer/prompts/prompt_template.txt) before creating the ZIP
 - **Workflow**: When updating the prompt template:
   1. Edit [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt) only
   2. Run [.claude/skills/build-zip.sh](.claude/skills/build-zip.sh) — it will sync the skill version automatically
@@ -300,8 +246,8 @@ These elements appear in both files and should stay synchronized:
 The [skill/pprof-analyzer-skill.zip](skill/pprof-analyzer-skill.zip) is a distributable package for sharing the skill outside the repository.
 
 **When to regenerate:**
-- After changes to any `.claude/skills/_impl_*` files
-- After changes to `.claude/skills/*.md` skill definitions
+- After changes to any `.claude/skills/<name>/` implementation files
+- After changes to `.claude/skills/<name>/SKILL.md` skill definitions
 - After changes to shared files like `action/pprof_integration.md`
 
 **How to regenerate:**
@@ -332,9 +278,9 @@ The folder itself is tracked in git (via a `.gitkeep` placeholder), but its **co
 
 ## Development conventions
 
-- **Python**: 3.11+. Runtime deps in `action/scripts/requirements.txt`, dev/test deps in `action/scripts/requirements-dev.txt`.
+- **Python**: See `action/scripts/requirements.txt` and `action/scripts/requirements-dev.txt` for runtime and dev dependencies.
 - **Tests**: run with `pytest` from the repo root. Test files live in `action/scripts/tests/`.
-- **Node tooling**: `pprof-to-md` is pinned in `action/package.json` and installed via `npm ci`. Do not use global installs — Dependabot tracks versions via `action/package-lock.json`.
+- **Node tooling**: `pprof-to-md` is pinned in `action/package.json`. Use `npm ci` for reproducible installs; Dependabot tracks `action/package-lock.json`.
 - **Code style**: follow existing conventions in the file you are editing. The Python code uses `from __future__ import annotations`, type hints, and docstrings.
 - **Commits**: when making a commit, append `Co-Authored-By: Cline SR` to the commit message. If your environment specifies a different attribution (e.g., from harness settings), use that instead.
 

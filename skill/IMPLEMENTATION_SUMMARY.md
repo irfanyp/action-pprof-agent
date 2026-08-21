@@ -12,7 +12,7 @@ Successfully created a complete, production-ready Claude skill that analyzes Go 
 
 ```
 pprof-analyzer.md                  # Skill definition (human-readable)
-_impl_pprof_analyzer/              # Implementation directory
+pprof-analyzer/                    # Implementation directory
   ├── analyzer.py                  # Main orchestration script (executable)
   ├── prompts/prompt_template.txt # Claude prompt (single-turn, no tool-use)
   ├── requirements.txt             # Python dependencies
@@ -98,7 +98,7 @@ All artifacts saved for review and debugging:
 
 # Or manual:
 cp pprof-analyzer.md ~/.claude/skills/
-cp -r _impl_pprof_analyzer ~/.claude/skills/
+cp -r pprof-analyzer ~/.claude/skills/
 pip install GitPython
 npm install -g pprof-to-md
 ```
@@ -205,7 +205,7 @@ Claude can handle 200K+ tokens, so we're well within limits.
 - Integration test framework (can add live tests)
 
 ```bash
-pytest _impl_pprof_analyzer/tests/
+pytest pprof-analyzer/tests/
 ```
 
 ### Code Style
@@ -324,7 +324,7 @@ summary, patch = extract_sections(response)
 Or call directly from CLI:
 
 ```bash
-python3 ~/.claude/skills/_impl_pprof_analyzer/analyzer.py \
+python3 ~/.claude/skills/pprof-analyzer/analyzer.py \
   cpu.prof ./ med
 ```
 
