@@ -1,6 +1,7 @@
 ---
 name: profiler-executor
 description: Execute Go CPU profiling with concurrent load testing
+command: python3 profiler.py
 ---
 
 # profiler-executor

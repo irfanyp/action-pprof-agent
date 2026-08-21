@@ -1,6 +1,7 @@
 ---
 name: load-test-generator
 description: Generate load test scripts for Go services
+command: python3 coordinator.py
 ---
 
 # load-test-generator

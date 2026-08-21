@@ -14,11 +14,10 @@
 #   .claude/skills/build-zip.sh
 #
 # The ZIP includes (all under pprof-analyzer-skill/ prefix):
-#   - SETUP.sh                        (installation helper, at root of zip)
-#   - Skill definitions (*.md)        (flattened, no .claude/skills/ nesting)
-#   - Skill implementations (_impl_*/) (flattened)
-#   - action/pprof_integration.md     (as pprof_integration.md)
-#   - skill/*.md                       (distribution documentation)
+#   - SETUP.sh                          (installation helper, at root of zip)
+#   - <skill-name>/SKILL.md + impl files (one directory per skill, Claude Code's
+#                                          expected <skills-dir>/<name>/SKILL.md layout)
+#   - skill/*.md                         (distribution documentation)
 
 set -e
 
@@ -32,9 +31,9 @@ cd "$REPO_ROOT"
 
 # Sync prompt template from action (single source of truth)
 echo "Syncing prompt template from action/scripts/ ..."
-mkdir -p .claude/skills/_impl_pprof_analyzer/prompts
+mkdir -p .claude/skills/pprof-analyzer/prompts
 cp action/scripts/prompts/prompt_template.txt \
-   .claude/skills/_impl_pprof_analyzer/prompts/prompt_template.txt
+   .claude/skills/pprof-analyzer/prompts/prompt_template.txt
 
 python3 << 'PYTHON_EOF'
 import zipfile
@@ -50,13 +49,6 @@ prefix = 'pprof-analyzer-skill'  # All files go under this top-level dir in the 
 file_map = [
     # Setup script — at the root of the zip
     ('.claude/skills/SETUP.sh', 'SETUP.sh'),
-    # Skill definitions (flattened to top level)
-    ('.claude/skills/pprof-analyzer.md', 'pprof-analyzer.md'),
-    ('.claude/skills/pprof-integrator.md', 'pprof-integrator.md'),
-    ('.claude/skills/load-test-generator.md', 'load-test-generator.md'),
-    ('.claude/skills/profiler-executor.md', 'profiler-executor.md'),
-    # Integration guide (renamed from action/ to root)
-    ('action/pprof_integration.md', 'pprof_integration.md'),
     # Distribution docs
     ('skill/README.md', 'README.md'),
     ('skill/INSTALL.md', 'INSTALL.md'),
@@ -65,12 +57,14 @@ file_map = [
     ('skill/IMPLEMENTATION_SUMMARY.md', 'IMPLEMENTATION_SUMMARY.md'),
 ]
 
-# Directories to include (flattened — contents go directly under prefix/)
+# Skill directories to include (each becomes <prefix>/<skill-name>/ containing
+# SKILL.md alongside its implementation files — matches the <skills-dir>/<name>/SKILL.md
+# layout Claude Code expects, so `cp -r <skill-name> ~/.claude/skills/` just works)
 dir_map = [
-    ('.claude/skills/_impl_pprof_analyzer', '_impl_pprof_analyzer'),
-    ('.claude/skills/_impl_pprof_integrator', '_impl_pprof_integrator'),
-    ('.claude/skills/_impl_load_test_generator', '_impl_load_test_generator'),
-    ('.claude/skills/_impl_profiler_executor', '_impl_profiler_executor'),
+    ('.claude/skills/pprof-analyzer', 'pprof-analyzer'),
+    ('.claude/skills/pprof-integrator', 'pprof-integrator'),
+    ('.claude/skills/load-test-generator', 'load-test-generator'),
+    ('.claude/skills/profiler-executor', 'profiler-executor'),
 ]
 
 # Skip these files/dirs when walking implementation directories
