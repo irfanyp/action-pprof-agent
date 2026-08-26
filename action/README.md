@@ -23,9 +23,9 @@ See [`examples/workflow.yml`](examples/workflow.yml) for a complete `workflow_di
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `token` | yes | — | GitHub token used for checkout and creating the Pull Request. |
-| `ai_endpoint` | yes | — | OpenAI-compatible endpoint URL for the LLM. |
+| `ai_endpoint` | yes | — | Endpoint URL for the LLM. Passed to litellm as `api_base`. |
 | `ai_key` | yes | — | API key for the LLM endpoint. Also used as the bearer token for `SERVICE_URL` authentication. |
-| `ai_model` | no | `gamma4` | LLM model name to use. |
+| `ai_model` | no | `gamma4` | LLM model name to use. Unprefixed values target the self-hosted OpenAI-compatible endpoint at `ai_endpoint`; prefix with a litellm provider (e.g. `anthropic/...`) to target a native provider — see [AI_MODEL provider prefixes](#ai_model-provider-prefixes) below. |
 | `reference` | yes | — | User reference option: `low`, `med`, or `high`. Controls analysis depth/strictness. |
 | `tags` | yes | — | Repository checkout branch/tag (git ref) to analyze. |
 | `analyzer_result_file` | no | `""` | Optional path to a raw pprof profile file for testing (file mode). |
@@ -49,7 +49,7 @@ The action runs a Python orchestration script that performs the following steps:
 3. **1c** — Verify git checkout is on the requested branch/tag.
 4. **1d** — Generate a list of Go files in the repository.
 5. **1e** — Construct the prompt from template + analyzer result + file list + reference level.
-6. **1f** — Feed the prompt to the LLM via OpenAI-compatible endpoint with tool-use enabled.
+6. **1f** — Feed the prompt to the LLM via `litellm.completion()` with tool-use enabled.
 7. **1g** — Extract the git patch and summary from the LLM result.
 8. **1h** — Apply the patch with `git apply`.
 9. **1i** — Write artifacts to `./artifacts/`.
@@ -59,6 +59,21 @@ The action runs a Python orchestration script that performs the following steps:
 ### Error Handling
 
 If any step 1b–1j fails, the script calls step 2a to flag the execution as error via SERVICE_URL.
+
+## AI_MODEL provider prefixes
+
+The LLM call goes through [litellm](https://github.com/BerriAI/litellm), which routes on a `provider/model` string convention. `AI_MODEL` values without a `/` are assumed to target the self-hosted OpenAI-compatible endpoint at `AI_ENDPOINT` and are auto-prefixed with `openai/`, so existing configurations keep working unchanged.
+
+To target a native provider API instead, prefix `AI_MODEL` with the matching litellm provider name:
+
+| `AI_MODEL` | Routes to |
+|---|---|
+| `gamma4` (unprefixed) | `AI_ENDPOINT`, OpenAI-compatible (default, unchanged behavior) |
+| `anthropic/claude-3-5-sonnet-20241022` | Anthropic Messages API |
+| `bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0` | AWS Bedrock |
+| `vertex_ai/gemini-1.5-pro` | Google Vertex AI |
+
+**Troubleshooting:** `ai_endpoint` and `ai_key` are always required inputs, even when targeting a native provider. If the provider doesn't need them (e.g. it authenticates via its own SDK-level credentials/environment variables), set them to any non-empty placeholder — litellm ignores `api_base` for providers that resolve their own endpoint.
 
 ## Testing / Local Mode
 

@@ -49,6 +49,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
 import pytest
+from litellm.types.utils import ChatCompletionMessageToolCall, ModelResponse
 
 import analyzer
 from analyzer import (
@@ -1118,20 +1119,19 @@ Ok.
 class TestCallLlm:
     """Tests for call_llm() — LLM API interaction.
 
-    call_llm() creates an OpenAI client, sends messages, and returns the response
-    text and messages. Configured with ai_key, ai_endpoint, and ai_model from config.
+    call_llm() calls litellm.completion() with the given messages and returns
+    the response text and messages. Configured with ai_key, ai_endpoint, and
+    ai_model from config.
     """
 
     def test_call_llm_returns_text_and_messages(self, mocker, mock_config):
         """The LLM response text and messages are returned."""
-        mock_completion = MagicMock()
+        mock_completion = mocker.Mock(spec=ModelResponse)
         mock_completion.choices = [MagicMock()]
         mock_completion.choices[0].message.content = "LLM response text"
         mock_completion.choices[0].message.tool_calls = None
 
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_completion
-        mocker.patch("analyzer.OpenAI", return_value=mock_client)
+        mocker.patch("analyzer.litellm.completion", return_value=mock_completion)
 
         messages = [{"role": "user", "content": "hi"}]
         text, returned_messages = call_llm(messages, mock_config)
@@ -1140,14 +1140,12 @@ class TestCallLlm:
 
     def test_call_llm_empty_response(self, mocker, mock_config):
         """An empty LLM response returns an empty string."""
-        mock_completion = MagicMock()
+        mock_completion = mocker.Mock(spec=ModelResponse)
         mock_completion.choices = [MagicMock()]
         mock_completion.choices[0].message.content = None
         mock_completion.choices[0].message.tool_calls = None
 
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_completion
-        mocker.patch("analyzer.OpenAI", return_value=mock_client)
+        mocker.patch("analyzer.litellm.completion", return_value=mock_completion)
 
         messages = [{"role": "user", "content": "hi"}]
         text, returned_messages = call_llm(messages, mock_config)
@@ -1155,38 +1153,138 @@ class TestCallLlm:
         assert returned_messages == messages
 
     def test_call_llm_uses_config(self, mocker, mock_config):
-        """The LLM client is configured with the config values."""
-        mock_completion = MagicMock()
+        """litellm.completion() is called with the config values."""
+        mock_completion = mocker.Mock(spec=ModelResponse)
         mock_completion.choices = [MagicMock()]
         mock_completion.choices[0].message.content = "ok"
         mock_completion.choices[0].message.tool_calls = None
 
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_completion
-        mock_openai = mocker.patch("analyzer.OpenAI", return_value=mock_client)
+        mock_litellm_completion = mocker.patch("analyzer.litellm.completion", return_value=mock_completion)
 
         call_llm([{"role": "user", "content": "hi"}], mock_config)
 
-        # Verify OpenAI client was initialized with config values
-        args, kwargs = mock_openai.call_args
+        args, kwargs = mock_litellm_completion.call_args
         assert kwargs["api_key"] == mock_config.ai_key
-        assert kwargs["base_url"] == mock_config.ai_endpoint
+        assert kwargs["api_base"] == mock_config.ai_endpoint
 
     def test_call_llm_create_uses_model(self, mocker, mock_config):
-        """The chat completion create uses the configured model."""
-        mock_completion = MagicMock()
+        """litellm.completion() uses the configured model, prefixed for litellm."""
+        mock_completion = mocker.Mock(spec=ModelResponse)
         mock_completion.choices = [MagicMock()]
         mock_completion.choices[0].message.content = "ok"
         mock_completion.choices[0].message.tool_calls = None
 
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_completion
-        mocker.patch("analyzer.OpenAI", return_value=mock_client)
+        mock_litellm_completion = mocker.patch("analyzer.litellm.completion", return_value=mock_completion)
 
         call_llm([{"role": "user", "content": "hi"}], mock_config)
 
-        args, kwargs = mock_client.chat.completions.create.call_args
-        assert kwargs["model"] == mock_config.ai_model
+        args, kwargs = mock_litellm_completion.call_args
+        assert mock_config.ai_model == "gamma4"
+        assert kwargs["model"] == "openai/gamma4"
+
+    def test_call_llm_handles_function_tool_call(self, mocker, mock_config):
+        """A function tool call is executed and its result appended as a 'tool' message."""
+        tool_call = ChatCompletionMessageToolCall(
+            id="call_1",
+            type="function",
+            function={"name": "read_file", "arguments": '{"file_path": "main.go"}'},
+        )
+
+        first_completion = mocker.Mock(spec=ModelResponse)
+        first_completion.choices = [MagicMock()]
+        first_completion.choices[0].message.content = ""
+        first_completion.choices[0].message.tool_calls = [tool_call]
+
+        second_completion = mocker.Mock(spec=ModelResponse)
+        second_completion.choices = [MagicMock()]
+        second_completion.choices[0].message.content = "final answer"
+        second_completion.choices[0].message.tool_calls = None
+
+        mocker.patch(
+            "analyzer.litellm.completion",
+            side_effect=[first_completion, second_completion],
+        )
+        mocker.patch(
+            "analyzer._execute_read_file_tool",
+            return_value="L1| package main",
+        )
+
+        messages = [{"role": "user", "content": "hi"}]
+        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        text, returned_messages = call_llm(messages, mock_config, tools=tools)
+
+        assert text == "final answer"
+        tool_result_messages = [m for m in returned_messages if m.get("role") == "tool"]
+        assert len(tool_result_messages) == 1
+        assert tool_result_messages[0]["tool_call_id"] == "call_1"
+        assert tool_result_messages[0]["content"] == "L1| package main"
+
+    def test_call_llm_filters_non_function_tool_call(self, mocker, mock_config):
+        """A non-function tool call is filtered out and never executed."""
+        custom_tool_call = mocker.Mock()  # not spec'd as ChatCompletionMessageToolCall
+
+        first_completion = mocker.Mock(spec=ModelResponse)
+        first_completion.choices = [MagicMock()]
+        first_completion.choices[0].message.content = ""
+        first_completion.choices[0].message.tool_calls = [custom_tool_call]
+
+        second_completion = mocker.Mock(spec=ModelResponse)
+        second_completion.choices = [MagicMock()]
+        second_completion.choices[0].message.content = "final answer"
+        second_completion.choices[0].message.tool_calls = None
+
+        mocker.patch(
+            "analyzer.litellm.completion",
+            side_effect=[first_completion, second_completion],
+        )
+        mock_execute = mocker.patch("analyzer._execute_read_file_tool")
+
+        messages = [{"role": "user", "content": "hi"}]
+        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        text, returned_messages = call_llm(messages, mock_config, tools=tools)
+
+        assert text == "final answer"
+        mock_execute.assert_not_called()
+        tool_result_messages = [m for m in returned_messages if m.get("role") == "tool"]
+        assert tool_result_messages == []
+
+    def test_call_llm_max_tool_calls_exceeded(self, mocker, mock_config):
+        """AnalyzerError('1f') is raised once tool calls exceed the configured limit."""
+        tool_call = ChatCompletionMessageToolCall(
+            id="call_1",
+            type="function",
+            function={"name": "read_file", "arguments": '{"file_path": "main.go"}'},
+        )
+
+        looping_completion = mocker.Mock(spec=ModelResponse)
+        looping_completion.choices = [MagicMock()]
+        looping_completion.choices[0].message.content = ""
+        looping_completion.choices[0].message.tool_calls = [tool_call]
+
+        mocker.patch("analyzer.litellm.completion", return_value=looping_completion)
+        mocker.patch("analyzer._execute_read_file_tool", return_value="ok")
+
+        messages = [{"role": "user", "content": "hi"}]
+        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        with pytest.raises(AnalyzerError) as exc_info:
+            call_llm(messages, mock_config, tools=tools)
+        assert exc_info.value.step == "1f"
+        assert "Tool calls exceeded limit" in exc_info.value.message
+
+
+class TestResolveLitellmModel:
+    """Tests for _resolve_litellm_model() — AI_MODEL to litellm provider/model mapping."""
+
+    def test_unprefixed_model_gets_openai_prefix(self):
+        """An unprefixed model name is assumed to target the self-hosted endpoint."""
+        assert analyzer._resolve_litellm_model("gamma4") == "openai/gamma4"
+
+    def test_prefixed_model_is_unchanged(self):
+        """A model already carrying a litellm provider prefix passes through unchanged."""
+        assert (
+            analyzer._resolve_litellm_model("anthropic/claude-3-5-sonnet-20241022")
+            == "anthropic/claude-3-5-sonnet-20241022"
+        )
 
 
 # Step 1h-1k: Apply patch and finalize
