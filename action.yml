@@ -10,13 +10,13 @@ inputs:
     description: 'GitHub token used for checkout and creating the Pull Request.'
     required: true
   ai_endpoint:
-    description: 'OpenAI-compatible endpoint URL for the LLM.'
+    description: 'Endpoint URL for the LLM (required). For self-hosted OpenAI-compatible endpoints, set AI_MODEL without a provider prefix (e.g. "gamma4"). For native provider APIs (Anthropic, Bedrock, Vertex, ...), set AI_MODEL with the matching litellm provider prefix (e.g. "anthropic/claude-3-5-sonnet-20241022") — see action/README.md.'
     required: true
   ai_key:
     description: 'API key for the LLM endpoint. Also used as the bearer token for SERVICE_URL authentication.'
     required: true
   ai_model:
-    description: 'LLM model name to use.'
+    description: 'LLM model name to use. Unprefixed values (e.g. "gamma4") target the self-hosted OpenAI-compatible endpoint at ai_endpoint. Prefix with a litellm provider (e.g. "anthropic/claude-3-5-sonnet-20241022") to target a native provider API instead.'
     required: false
     default: 'gamma4'
   reference:

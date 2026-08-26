@@ -32,14 +32,10 @@ from typing import overload
 
 import git
 import requests
-import tiktoken
 
-from openai import OpenAI
-from openai.types.chat import (
-    ChatCompletionMessageFunctionToolCall,
-    ChatCompletionMessageParam,
-    ChatCompletionToolParam,
-)
+import litellm
+from litellm.types.llms.openai import AllMessageValues, ChatCompletionToolParam
+from litellm.types.utils import ChatCompletionMessageToolCall, ModelResponse
 
 
 
@@ -598,61 +594,57 @@ def construct_prompt(template_path: Path, reference: str, analyzer_result: str, 
 
 
 # ---------------------------------------------------------------------------
-# Token counting (for monitoring prompt size)
-# ---------------------------------------------------------------------------
-
-def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
-    """Count tokens in text using the specified model's encoding.
-
-    Falls back to cl100k_base encoding if the model is not recognized by tiktoken.
-    """
-    try:
-        enc = tiktoken.encoding_for_model(model)
-    except KeyError:
-        # Unknown model; use the default GPT encoding
-        enc = tiktoken.get_encoding("cl100k_base")
-    return len(enc.encode(text))
-
-
-
-
-# ---------------------------------------------------------------------------
 # Step 1f — Feed to LLM
 # ---------------------------------------------------------------------------
 
+def _resolve_litellm_model(ai_model: str) -> str:
+    """Map AI_MODEL to a litellm provider/model string.
+
+    Unprefixed values (e.g. "gamma4") are assumed to target the existing
+    self-hosted OpenAI-compatible endpoint and are auto-prefixed with
+    "openai/" so existing configs keep working unchanged. Users targeting a
+    native provider opt in by setting AI_MODEL to an already-prefixed
+    litellm model string, e.g. "anthropic/claude-3-5-sonnet-20241022".
+    """
+    return ai_model if "/" in ai_model else f"openai/{ai_model}"
+
+
 def call_llm(
-    messages: list[ChatCompletionMessageParam],
+    messages: list[AllMessageValues],
     config: EnvConfig,
     tools: list[ChatCompletionToolParam] | None = None,
     repo: git.Repo | None = None,
-) -> tuple[str, list[ChatCompletionMessageParam]]:
-    """Call the OpenAI-compatible endpoint with the given conversation.
+) -> tuple[str, list[AllMessageValues]]:
+    """Call the configured LLM endpoint with the given conversation via litellm.
 
     If tools are provided, enables tool-use and handles tool calls in a loop.
     Returns (final_text_response, all_messages_for_context).
     """
-    client = OpenAI(
-        api_key=config.ai_key,
-        base_url=config.ai_endpoint,
-        timeout=300,
-    )
-    print(f"[1f] Calling LLM (model={config.ai_model})...")
+    model = _resolve_litellm_model(config.ai_model)
+    print(f"[1f] Calling LLM (model={model})...")
 
     tool_calls_made = 0
     max_tool_calls = 10
 
     while True:
-        # Build kwargs conditionally so we only pass `tools` when provided.
-        # The OpenAI SDK uses a NotGiven sentinel for omitted params; passing
-        # None is rejected by the type checker.
         kwargs: dict = {
-            "model": config.ai_model,
+            "model": model,
             "messages": messages,
             "temperature": 0.2,
+            "api_key": config.ai_key,
+            "api_base": config.ai_endpoint,
+            "timeout": 300,
+            "drop_params": True,  # tolerate providers/models that reject params like `temperature`
         }
         if tools:
             kwargs["tools"] = tools
-        completion = client.chat.completions.create(**kwargs)
+        completion = litellm.completion(**kwargs)
+        # litellm.completion() is typed to return `ModelResponse | CustomStreamWrapper`
+        # because the function also handles stream=True calls. We never pass
+        # stream=True, so this always holds at runtime; the assert narrows the
+        # type for Pylance so `.choices` type-checks (CustomStreamWrapper has no
+        # `.choices` attribute).
+        assert isinstance(completion, ModelResponse)
 
         assistant_message = completion.choices[0].message
 
@@ -668,7 +660,7 @@ def call_llm(
         print(f"[1f] LLM made {len(tool_calls)} tool call(s).")
 
         # Add the assistant's response (with tool calls) to the conversation
-        assistant_msg: ChatCompletionMessageParam = {
+        assistant_msg: AllMessageValues = {
             "role": "assistant",
             "content": text,
             "tool_calls": [
@@ -681,14 +673,14 @@ def call_llm(
                     },
                 }
                 for tc in tool_calls
-                if isinstance(tc, ChatCompletionMessageFunctionToolCall)
+                if isinstance(tc, ChatCompletionMessageToolCall)
             ],
         }
         messages.append(assistant_msg)
 
         # Process each tool call and add tool responses
         for i, tool_call in enumerate(tool_calls, 1):
-            if not isinstance(tool_call, ChatCompletionMessageFunctionToolCall):
+            if not isinstance(tool_call, ChatCompletionMessageToolCall):
                 continue
             tool_name = tool_call.function.name
             tool_input = tool_call.function.arguments
@@ -869,7 +861,7 @@ def generate_valid_patch(prompt: str, config: EnvConfig, repo: git.Repo | None =
     Returns (summary, patch, llm_result) from the first attempt whose patch
     checks out cleanly. Raises AnalyzerError("1h") if no attempt succeeds.
     """
-    messages: list[ChatCompletionMessageParam] = [
+    messages: list[AllMessageValues] = [
         {"role": "system", "content": "You are a performance engineering assistant that produces git patches. Use the read_file tool to examine code when needed, then produce a SUMMARY and PATCH."},
         {"role": "user", "content": prompt},
     ]

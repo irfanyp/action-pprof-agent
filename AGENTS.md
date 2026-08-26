@@ -184,7 +184,7 @@ The two implementations ([action/scripts/analyzer.py](action/scripts/analyzer.py
 - Agent loop: LLM can call `read_file` tool to request files/lines as needed
 - Applies patches, creates branches, commits, pushes, opens PRs
 - Handles polling, error flagging, step status tracking
-- Requires: `openai`, `requests`, `tiktoken`, `GitPython`
+- Requires: `litellm`, `requests`, `GitPython`
 
 **Claude Code Skill (.claude/skills/pprof-analyzer/analyzer.py):**
 - Local context gathering only (424 lines)
