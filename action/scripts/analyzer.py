@@ -34,7 +34,11 @@ import git
 import requests
 
 import litellm
-from litellm.types.llms.openai import AllMessageValues, ChatCompletionToolParam
+from litellm.types.llms.openai import (
+    AllMessageValues,
+    ChatCompletionAssistantMessage,
+    ChatCompletionToolParam,
+)
 from litellm.types.utils import ChatCompletionMessageToolCall, ModelResponse
 
 
@@ -659,14 +663,20 @@ def call_llm(
         tool_calls = assistant_message.tool_calls
         print(f"[1f] LLM made {len(tool_calls)} tool call(s).")
 
-        # Add the assistant's response (with tool calls) to the conversation
-        assistant_msg: AllMessageValues = {
+        # Add the assistant's response (with tool calls) to the conversation.
+        # ChatCompletionAssistantMessage narrows AllMessageValues to the
+        # assistant variant so Pylance accepts the tool_calls field.
+        # ChatCompletionMessageToolCall.type is typed as str | None but
+        # litellm always sets it to "function" (the only type supported), so
+        # we use the literal here to satisfy the TypedDict's
+        # Literal["function"] requirement.
+        assistant_msg: ChatCompletionAssistantMessage = {
             "role": "assistant",
             "content": text,
             "tool_calls": [
                 {
                     "id": tc.id,
-                    "type": tc.type,
+                    "type": "function",
                     "function": {
                         "name": tc.function.name,
                         "arguments": tc.function.arguments,
