@@ -1,16 +1,9 @@
 from __future__ import annotations
 
 import os
-import sys
 import threading
-from pathlib import Path
 
-# Add skills directory to path
-_skills_path = Path(__file__).parent.parent.parent / ".claude" / "skills"
-if str(_skills_path) not in sys.path:
-    sys.path.insert(0, str(_skills_path))
-
-from profiler_executor.profiler import run_profiler  # type: ignore
+from skill.profiler_executor.profiler import run_profiler
 
 # Module-level lock dictionary, keyed by real path of repo_path
 _locks: dict[str, threading.Lock] = {}

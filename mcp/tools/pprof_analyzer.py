@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Literal
 
-# Add skills directory to path
-_skills_path = Path(__file__).parent.parent.parent / ".claude" / "skills"
-if str(_skills_path) not in sys.path:
-    sys.path.insert(0, str(_skills_path))
-
-from pprof_analyzer.analyzer import run_analyzer  # type: ignore
+from skill.pprof_analyzer.analyzer import run_analyzer
 
 
 def analyze_pprof_profile(

@@ -2,17 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# Setup: Add skills path before tests run
-_skills_path = Path(__file__).parent.parent.parent / ".claude" / "skills"
-if str(_skills_path) not in sys.path:
-    sys.path.insert(0, str(_skills_path))
 
 
 @pytest.fixture

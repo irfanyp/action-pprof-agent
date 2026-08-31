@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Literal
 
-# Add skills directory to path
-_skills_path = Path(__file__).parent.parent.parent / ".claude" / "skills"
-if str(_skills_path) not in sys.path:
-    sys.path.insert(0, str(_skills_path))
-
-from load_test_generator.coordinator import run_load_test_generator  # type: ignore
+from skill.load_test_generator.coordinator import run_load_test_generator
 
 
 def generate_load_test(
@@ -33,4 +26,4 @@ def generate_load_test(
         FileNotFoundError: If repo not found
         ValueError: If repo is not valid or tool is invalid
     """
-    return run_load_test_generator(repo_path, tool)  # type: ignore
+    return run_load_test_generator(repo_path, tool)

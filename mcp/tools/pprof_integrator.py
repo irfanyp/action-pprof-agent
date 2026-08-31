@@ -1,14 +1,6 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-# Add skills directory to path
-_skills_path = Path(__file__).parent.parent.parent / ".claude" / "skills"
-if str(_skills_path) not in sys.path:
-    sys.path.insert(0, str(_skills_path))
-
-from pprof_integrator.coordinator import run_integrator  # type: ignore
+from skill.pprof_integrator.coordinator import run_integrator
 
 
 def integrate_pprof_endpoint(repo_path: str) -> str:

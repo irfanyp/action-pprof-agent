@@ -1,16 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
-# Add repo root to path for skills_registry import
-import sys
-_repo_root = Path(__file__).parent.parent
-if str(_repo_root) not in sys.path:
-    sys.path.insert(0, str(_repo_root))
-
-# Import skills registry (handles skills path setup and exports wrapper functions)
-from skills_registry import run_analyzer, run_integrator, run_load_test_generator, run_profiler
+from skill.pprof_analyzer.analyzer import run_analyzer
+from skill.pprof_integrator.coordinator import run_integrator
+from skill.load_test_generator.coordinator import run_load_test_generator
+from skill.profiler_executor.profiler import run_profiler
 
 from mcp.server import MCPServer
 
