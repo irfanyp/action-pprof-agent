@@ -4,6 +4,8 @@ Analyze Go pprof profiles and generate performance optimization patches in Claud
 
 This is a **standalone Claude skill** version of the [pprof-analyzer GitHub Action](https://github.com/irfanyusupramono/pprof-analyzer), designed to work locally without requiring GitHub Actions or a remote analyzer service.
 
+**Note on folder naming:** The distributed ZIP uses hyphenated names (e.g., `pprof-analyzer`, `load-test-generator`) for backward compatibility. In the source repository, skill directories use underscores (e.g., `pprof_analyzer`, `load_test_generator`) to enable Python imports in the MCP server and other integrations.
+
 ## Quick Start
 
 ### Complete End-to-End Workflow (Recommended)
@@ -455,10 +457,14 @@ To rebuild the ZIP after making changes, run from the repository root:
 
 ### Running Tests
 
+For developers working in the source repository:
+
 ```bash
 pip install pytest
-pytest .claude/skills/pprof-analyzer/tests/
+pytest .claude/skills/pprof_analyzer/tests/
 ```
+
+**Note:** Skill directories use underscores in the source repository (e.g., `pprof_analyzer`) to support Python imports. In the distributed ZIP package, they use hyphens (e.g., `pprof-analyzer`) for backward compatibility.
 
 ### Adding Features
 
