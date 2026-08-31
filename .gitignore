@@ -28,5 +28,8 @@ skill/pprof-analyzer-skill.zip
 .ai_output/*
 !.ai_output/.gitkeep
 
+# Python virtual environments
+.venv/
+
 # Other
 server/
