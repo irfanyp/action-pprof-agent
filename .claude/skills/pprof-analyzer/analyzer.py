@@ -337,8 +337,72 @@ def write_artifacts(
         log(f"✓ Wrote {name}")
 
 
+def run_analyzer(profile_path: str | Path, repo_path: str | Path, reference_level: str) -> str:
+    """Run analyzer and return prompt (importable wrapper for MCP).
+
+    Args:
+        profile_path: Path to pprof profile file
+        repo_path: Path to repository
+        reference_level: One of "low", "med", "high"
+
+    Returns:
+        Markdown prompt for Claude analysis
+
+    Raises:
+        ValueError: If inputs are invalid
+        FileNotFoundError: If profile or repo not found
+    """
+    profile_path = Path(profile_path)
+    repo_path = Path(repo_path)
+    reference_level = reference_level.lower()
+
+    # Validate inputs
+    if not profile_path.exists():
+        raise FileNotFoundError(f"Profile file not found: {profile_path}")
+    if not repo_path.exists():
+        raise FileNotFoundError(f"Repository path not found: {repo_path}")
+    if reference_level not in SkillConfig.VALID_REFERENCES:
+        raise ValueError(f"Invalid reference level: {reference_level}. Must be one of: {SkillConfig.VALID_REFERENCES}")
+
+    # Step 1: Convert pprof to markdown
+    analyzer_result = convert_pprof_to_markdown(profile_path)
+
+    # Step 2: Prepare git repo
+    try:
+        repo = git.Repo(repo_path)
+    except git.InvalidGitRepositoryError:
+        raise ValueError(f"Not a git repository: {repo_path}") from None
+
+    # Step 3: Extract hotspot files and smart-select
+    hotspot_files = extract_hotspot_files(analyzer_result)
+    all_files = find_all_go_files(repo)
+    selected_files = smart_select_files(hotspot_files, all_files, repo)
+
+    # Step 4: Read source code for selected files
+    source_code_parts = []
+    total_size = 0
+    for f in selected_files:
+        if total_size > SkillConfig.MAX_CODE_SIZE_KB * 1024:
+            break
+        try:
+            content = read_file_with_lines(f, repo)
+            part = f"## {f}\n{content}\n\n"
+            source_code_parts.append(part)
+            total_size += len(content)
+        except Exception:
+            continue
+
+    source_code = "".join(source_code_parts)
+
+    # Step 5: Build and return prompt
+    template_path = Path(__file__).parent / "prompts" / "prompt_template.txt"
+    prompt = build_prompt(template_path, reference_level, analyzer_result, source_code)
+
+    return prompt
+
+
 def main() -> int:
-    """Main orchestration."""
+    """Main orchestration (CLI entrypoint)."""
     # Parse arguments
     if len(sys.argv) != 4:
         print(
@@ -348,77 +412,34 @@ def main() -> int:
         print("Example: python analyzer.py cpu.prof ./ med", file=sys.stderr)
         return 1
 
-    profile_path = Path(sys.argv[1])
-    repo_path = Path(sys.argv[2])
-    reference_level = sys.argv[3].lower()
-
-    # Validate inputs
-    if not profile_path.exists():
-        error(f"Profile file not found: {profile_path}")
-    if not repo_path.exists():
-        error(f"Repository path not found: {repo_path}")
-    if reference_level not in SkillConfig.VALID_REFERENCES:
-        error(f"Invalid reference level: {reference_level}. Must be one of: {SkillConfig.VALID_REFERENCES}")
-
-    log(f"Profile: {profile_path}")
-    log(f"Repository: {repo_path}")
-    log(f"Reference level: {reference_level}")
-
-    # Step 1: Convert pprof to markdown
-    analyzer_result = convert_pprof_to_markdown(profile_path)
-
-    # Step 2: Prepare git repo
     try:
-        repo = git.Repo(repo_path)
-    except git.InvalidGitRepositoryError:
-        error(f"Not a git repository: {repo_path}")
-        return 1  # error() calls sys.exit(1); this satisfies type checkers
+        profile_path = sys.argv[1]
+        repo_path = sys.argv[2]
+        reference_level = sys.argv[3]
 
-    # Step 3: Extract hotspot files and smart-select
-    hotspot_files = extract_hotspot_files(analyzer_result)
-    all_files = find_all_go_files(repo)
-    selected_files = smart_select_files(hotspot_files, all_files, repo)
+        log(f"Profile: {profile_path}")
+        log(f"Repository: {repo_path}")
+        log(f"Reference level: {reference_level}")
 
-    log(f"✓ Selected files: {', '.join(selected_files[:5])}" + (
-        f" ... and {len(selected_files) - 5} more" if len(selected_files) > 5 else ""
-    ))
+        # Run analyzer
+        prompt = run_analyzer(profile_path, repo_path, reference_level)
 
-    # Step 4: Read source code for selected files
-    source_code_parts = []
-    total_size = 0
-    for f in selected_files:
-        if total_size > SkillConfig.MAX_CODE_SIZE_KB * 1024:
-            log(f"Reached code size limit ({SkillConfig.MAX_CODE_SIZE_KB}KB), stopping", "WARN")
-            break
-        try:
-            content = read_file_with_lines(f, repo)
-            part = f"## {f}\n{content}\n\n"
-            source_code_parts.append(part)
-            total_size += len(content)
-        except Exception as e:
-            log(f"Failed to read {f}: {e}", "WARN")
+        # Output prompt
+        log("=" * 70)
+        log("PROMPT FOR CLAUDE ANALYSIS")
+        log("=" * 70)
+        print(prompt)
+        log("=" * 70)
 
-    source_code = "".join(source_code_parts)
-    log(f"✓ Read {len(source_code)} chars of source code")
+        # Write artifacts for reference
+        analyzer_result = convert_pprof_to_markdown(Path(profile_path))
+        write_artifacts("", "", analyzer_result, prompt)
+        log("✓ Wrote prompt to .ai_output/prompt.txt")
 
-    # Step 5: Build prompt
-    template_path = Path(__file__).parent / "prompts" / "prompt_template.txt"
-    prompt = build_prompt(template_path, reference_level, analyzer_result, source_code)
-    log(f"✓ Built prompt ({len(prompt)} chars)")
-
-    # Step 6: Return prompt for Claude to analyze
-    # (Claude Code will handle the actual analysis call)
-    log("=" * 70)
-    log("PROMPT FOR CLAUDE ANALYSIS")
-    log("=" * 70)
-    print(prompt)
-    log("=" * 70)
-
-    # Step 7: Write artifacts for reference
-    write_artifacts("", "", analyzer_result, prompt)
-    log("✓ Wrote prompt to .ai_output/prompt.txt")
-
-    return 0
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        error(str(e))
+        return 1  # error() calls sys.exit(1), but return for type checking
 
 
 if __name__ == "__main__":

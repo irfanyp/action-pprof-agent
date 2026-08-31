@@ -11,30 +11,32 @@ import sys
 from pathlib import Path
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Integrate pprof endpoint into Go service"
-    )
-    parser.add_argument("repo_path", help="Path to Go repository")
-    args = parser.parse_args()
+def run_integrator(repo_path: str | Path) -> str:
+    """Run integration analyzer and return prompt (importable wrapper for MCP).
 
-    repo_path = Path(args.repo_path).resolve()
+    Args:
+        repo_path: Path to Go repository
+
+    Returns:
+        Markdown prompt for Claude analysis
+
+    Raises:
+        FileNotFoundError: If repo or guide not found
+        ValueError: If repo is not valid
+    """
+    repo_path = Path(repo_path).resolve()
 
     if not repo_path.exists():
-        print(f"Error: Repository path does not exist: {repo_path}")
-        return 1
+        raise FileNotFoundError(f"Repository path does not exist: {repo_path}")
 
     if not (repo_path / "go.mod").exists():
-        print(f"Error: Not a Go module (no go.mod found): {repo_path}")
-        return 1
+        raise ValueError(f"Not a Go module (no go.mod found): {repo_path}")
 
-    # Read the pprof integration guide (included in skill package)
+    # Read the pprof integration guide
     guide_path = Path(__file__).parent / "pprof_integration.md"
 
     if not guide_path.exists():
-        print(f"Error: pprof_integration.md not found at {guide_path}")
-        print(f"Skill may not be properly installed. Check {Path(__file__).parent}")
-        return 1
+        raise FileNotFoundError(f"pprof_integration.md not found at {guide_path}")
 
     with open(guide_path) as f:
         integration_guide = f.read()
@@ -61,8 +63,23 @@ Steps:
 Output your analysis and code changes. The user will review and apply them manually.
 """
 
-    print(prompt)
-    return 0
+    return prompt
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Integrate pprof endpoint into Go service"
+    )
+    parser.add_argument("repo_path", help="Path to Go repository")
+    args = parser.parse_args()
+
+    try:
+        prompt = run_integrator(args.repo_path)
+        print(prompt)
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
