@@ -1,31 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
-import sys
 from pathlib import Path
 
-# Add skills directory to path so tool modules can import from it
-_skills_path = Path(__file__).parent.parent / ".claude" / "skills"
-if str(_skills_path) not in sys.path:
-    sys.path.insert(0, str(_skills_path))
+# Add repo root to path for skills_registry import
+import sys
+_repo_root = Path(__file__).parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+# Import skills registry (handles skills path setup and exports wrapper functions)
+from skills_registry import run_analyzer, run_integrator, run_load_test_generator, run_profiler
 
 from mcp.server import MCPServer
-
-# Load tools directly from files (simpler than managing package conflicts)
-_tools = {}
-_tools_dir = Path(__file__).parent / "tools"
-for tool_name in ["pprof_analyzer", "pprof_integrator", "load_test_generator", "profiler_executor"]:
-    spec = importlib.util.spec_from_file_location(tool_name, _tools_dir / f"{tool_name}.py")
-    if spec and spec.loader:
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _tools[tool_name] = module
-
-analyze_pprof_profile = _tools["pprof_analyzer"].analyze_pprof_profile
-integrate_pprof_endpoint = _tools["pprof_integrator"].integrate_pprof_endpoint
-generate_load_test = _tools["load_test_generator"].generate_load_test
-run_cpu_profile = _tools["profiler_executor"].run_cpu_profile
 
 # Create the MCP server
 server = MCPServer("pprof-analyzer")
@@ -51,7 +38,7 @@ def analyze_pprof_profile_tool(
     Returns:
         Markdown prompt for LLM analysis
     """
-    return analyze_pprof_profile(profile_path, repo_path, reference_level)  # type: ignore
+    return run_analyzer(profile_path, repo_path, reference_level)
 
 
 @server.tool()
@@ -68,7 +55,7 @@ def integrate_pprof_endpoint_tool(repo_path: str) -> str:
     Returns:
         Markdown prompt for LLM to generate pprof integration code
     """
-    return integrate_pprof_endpoint(repo_path)
+    return run_integrator(repo_path)
 
 
 @server.tool()
@@ -89,7 +76,7 @@ def generate_load_test_tool(
     Returns:
         Markdown prompt for LLM to generate load test script
     """
-    return generate_load_test(repo_path, tool)  # type: ignore
+    return run_load_test_generator(repo_path, tool)
 
 
 @server.tool()
@@ -117,7 +104,7 @@ def run_cpu_profile_tool(
     Returns:
         Profiling summary + location where profile was written
     """
-    return run_cpu_profile(repo_path, port, load_cmd, duration)
+    return run_profiler(repo_path, port, load_cmd, duration)
 
 
 async def main():

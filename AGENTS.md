@@ -15,7 +15,7 @@ A reusable GitHub Action that:
 5. Extracts a unified-diff patch from the LLM response and applies it with `git apply`.
 6. Creates a branch, commits, pushes, and opens a Pull Request via `gh`.
 
-### 2. Claude Code Skill (.claude/skills/pprof-analyzer/)
+### 2. Claude Code Skill (skill/pprof-analyzer/)
 A Claude Code skill that analyzes pprof profiles locally:
 1. Reads pprof profile from file.
 2. Converts the raw profile to LLM-friendly markdown via `pprof-to-md`.
@@ -32,7 +32,7 @@ Key difference: **Skill uses Claude's built-in capabilities; Action uses externa
 
 An MCP (Model Context Protocol) server that exposes all four skills as tools via stdio transport:
 
-1. Wraps the four skill scripts (`.claude/skills/`) without modification
+1. Wraps the four skill scripts (`skill/`) without modification
 2. Registers them as MCP tools: `analyze_pprof_profile`, `integrate_pprof_endpoint`, `generate_load_test`, `run_cpu_profile`
 3. Communicates via MCP stdio protocol (works with Claude Desktop, Cline, Cursor, etc.)
 4. Each tool call invokes the corresponding skill wrapper function and returns the result
@@ -44,7 +44,7 @@ See [`README.md`](README.md) for feature comparison and [`mcp/README.md`](mcp/RE
 
 ## Key files & structure
 
-**Skill implementations** live in `.claude/skills/<name>/` directories with underscores (e.g., `pprof_analyzer/`, `load_test_generator/`), each with a `SKILL.md` definition and Python implementation files. The **GitHub Action** code is in `action/scripts/analyzer.py`, with test fixtures in `action/scripts/tests/`. The **MCP Server** code is in `mcp/` with tool wrappers in `mcp/tools/` and tests in `mcp/tests/`. See [README.md](README.md) for the entry point, [action/README.md](action/README.md) for GitHub Action documentation, and [mcp/README.md](mcp/README.md) for MCP Server setup.
+**Skill implementations** live in `skill/<name>/` directories with underscores (e.g., `pprof_analyzer/`, `load_test_generator/`), each with a `SKILL.md` definition and Python implementation files. The **GitHub Action** code is in `action/scripts/analyzer.py`, with test fixtures in `action/scripts/tests/`. The **MCP Server** code is in `mcp/` with tool wrappers in `mcp/tools/` and tests in `mcp/tests/`. See [README.md](README.md) for the entry point, [action/README.md](action/README.md) for GitHub Action documentation, and [mcp/README.md](mcp/README.md) for MCP Server setup.
 
 ## Implementation Flows
 
@@ -68,7 +68,7 @@ The action runs these steps in sequence:
 
 **When `analyzer_result_file` is set (file mode):** Skip steps 1a, 1b (service polling), 1k, and 2a (no service interaction). Load profile from file instead. Generate local `run_id` (form: `local-<timestamp>`).
 
-### Claude Code Skill Flow (.claude/skills/pprof-analyzer/analyzer.py)
+### Claude Code Skill Flow (skill/pprof-analyzer/analyzer.py)
 
 The skill runs these steps locally (simplified, single-turn analysis):
 
@@ -109,7 +109,7 @@ The skill runs these steps locally (simplified, single-turn analysis):
 
 Three additional Claude Code skills support the main `pprof-analyzer` skill by handling prerequisites:
 
-#### 1. pprof-integrator (`.claude/skills/pprof-integrator/`)
+#### 1. pprof-integrator (`skill/pprof-integrator/`)
 
 **Purpose:** Integrate Go `net/http/pprof` endpoint into a Go service using the guidance from `action/pprof_integration.md`.
 
@@ -123,7 +123,7 @@ Three additional Claude Code skills support the main `pprof-analyzer` skill by h
 
 **Output:** Go code changes (pprofserver.go, main() modifications) with environment variables `PPROF_PORT`, `PPROF_BIND_ADDR`, `ENABLE_PPROF`.
 
-#### 2. load-test-generator (`.claude/skills/load-test-generator/`)
+#### 2. load-test-generator (`skill/load-test-generator/`)
 
 **Purpose:** Analyze a Go service and generate a load test script to drive realistic traffic during profiling.
 
@@ -137,7 +137,7 @@ Three additional Claude Code skills support the main `pprof-analyzer` skill by h
 
 **Output:** Load test script file (e.g., `load_test.js` for k6) that generates sustained load for 30-second profiling window.
 
-#### 3. profiler-executor (`.claude/skills/profiler-executor/`)
+#### 3. profiler-executor (`skill/profiler-executor/`)
 
 **Purpose:** Execute Go CPU profiling with concurrent load testing to capture realistic performance data.
 
@@ -186,7 +186,7 @@ User starts with a raw Go service:
 
 ## Synchronization between Action and Skill implementations
 
-The two implementations ([action/scripts/analyzer.py](action/scripts/analyzer.py) and [.claude/skills/pprof-analyzer/analyzer.py](.claude/skills/pprof-analyzer/analyzer.py)) are **intentionally different** but share some common logic and patterns. This section clarifies when changes in one should be reflected in the other.
+The two implementations ([action/scripts/analyzer.py](action/scripts/analyzer.py) and [skill/pprof-analyzer/analyzer.py](skill/pprof-analyzer/analyzer.py)) are **intentionally different** but share some common logic and patterns. This section clarifies when changes in one should be reflected in the other.
 
 ### Intentional design differences
 
@@ -198,7 +198,7 @@ The two implementations ([action/scripts/analyzer.py](action/scripts/analyzer.py
 - Handles polling, error flagging, step status tracking
 - Requires: `litellm`, `requests`, `GitPython`
 
-**Claude Code Skill (.claude/skills/pprof-analyzer/analyzer.py):**
+**Claude Code Skill (skill/pprof-analyzer/analyzer.py):**
 - Local context gathering only (424 lines)
 - No external LLM API calls
 - Reads all code upfront using `smart_select_files()`
@@ -213,7 +213,7 @@ These elements appear in both files and should stay synchronized:
 1. **Regex patterns** — For parsing LLM responses:
    - `PATCH_FENCE_PATTERN = r"```(?:diff[a-z-]*)?\n(.*?)```"`
    - `SUMMARY_PATTERN = r"###\s*SUMMARY\s*\n(.*?)(?:###\s*PATCH|\Z)"`
-   - Location: `Config.PATCH_FENCE_PATTERN` (action/scripts/analyzer.py), same in `.claude/skills/pprof-analyzer/analyzer.py`
+   - Location: `Config.PATCH_FENCE_PATTERN` (action/scripts/analyzer.py), same in `skill/pprof-analyzer/analyzer.py`
    - Reason: Both parse SUMMARY/PATCH structure from LLM responses; must match exactly
 
 2. **Reference levels** — Valid values for profiling depth:
@@ -235,7 +235,7 @@ These elements appear in both files and should stay synchronized:
 
 5. **GitPython Dependency Pin** — For compatibility:
    - `GitPython~=3.1.59` 
-   - Location: `.claude/skills/pprof_analyzer/requirements.txt` (skill), `mcp/requirements.txt` (MCP server)
+   - Location: `skill/pprof_analyzer/requirements.txt` (skill), `mcp/requirements.txt` (MCP server)
    - Reason: Both invoke `analyzer.py` which imports `GitPython`; MCP server runs it via the same interpreter
    - Update strategy: If skill upgrades `GitPython`, update MCP pin to match
 
@@ -264,10 +264,10 @@ These elements appear in both files and should stay synchronized:
 
 **Prompt template (single source of truth):**
 - **Source**: [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt) is the **canonical version**
-- **Sync mechanism**: [.claude/skills/build-zip.sh](.claude/skills/build-zip.sh) automatically copies it to [.claude/skills/pprof-analyzer/prompts/prompt_template.txt](.claude/skills/pprof-analyzer/prompts/prompt_template.txt) before creating the ZIP
+- **Sync mechanism**: [skill/build-zip.sh](skill/build-zip.sh) automatically copies it to [skill/pprof-analyzer/prompts/prompt_template.txt](skill/pprof-analyzer/prompts/prompt_template.txt) before creating the ZIP
 - **Workflow**: When updating the prompt template:
   1. Edit [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt) only
-  2. Run [.claude/skills/build-zip.sh](.claude/skills/build-zip.sh) — it will sync the skill version automatically
+  2. Run [skill/build-zip.sh](skill/build-zip.sh) — it will sync the skill version automatically
   3. Commit both the prompt template change and the regenerated ZIP
   4. Test both implementations (action and skill) with sample profiles
 
@@ -276,17 +276,17 @@ These elements appear in both files and should stay synchronized:
 The [skill/pprof-analyzer-skill.zip](skill/pprof-analyzer-skill.zip) is a distributable package for sharing the skill outside the repository.
 
 **When to regenerate:**
-- After changes to any `.claude/skills/<name>/` implementation files
-- After changes to `.claude/skills/<name>/SKILL.md` skill definitions
+- After changes to any `skill/<name>/` implementation files
+- After changes to `skill/<name>/SKILL.md` skill definitions
 - After changes to shared files like `action/pprof_integration.md`
 
 **How to regenerate:**
 ```bash
-.claude/skills/build-zip.sh
+skill/build-zip.sh
 ```
 
-This script ([.claude/skills/build-zip.sh](.claude/skills/build-zip.sh)) packages:
-- All skill definitions and implementations (`.claude/skills/`)
+This script ([skill/build-zip.sh](skill/build-zip.sh)) packages:
+- All skill definitions and implementations (`skill/`)
 - Integration guide (`action/pprof_integration.md`)
 - Distribution documentation (`skill/*.md`)
 

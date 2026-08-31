@@ -11,7 +11,7 @@
 #   ./SETUP.sh install
 #
 # Usage:
-#   .claude/skills/build-zip.sh
+#   skill/build-zip.sh
 #
 # The ZIP includes (all under pprof-analyzer-skill/ prefix):
 #   - SETUP.sh                          (installation helper, at root of zip)
@@ -22,7 +22,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ZIP_PATH="$REPO_ROOT/skill/pprof-analyzer-skill.zip"
 
 echo "Building skill ZIP: $ZIP_PATH"
@@ -31,9 +31,9 @@ cd "$REPO_ROOT"
 
 # Sync prompt template from action (single source of truth)
 echo "Syncing prompt template from action/scripts/ ..."
-mkdir -p .claude/skills/pprof_analyzer/prompts
+mkdir -p skill/pprof_analyzer/prompts
 cp action/scripts/prompts/prompt_template.txt \
-   .claude/skills/pprof_analyzer/prompts/prompt_template.txt
+   skill/pprof_analyzer/prompts/prompt_template.txt
 
 python3 << 'PYTHON_EOF'
 import zipfile
@@ -48,7 +48,7 @@ prefix = 'pprof-analyzer-skill'  # All files go under this top-level dir in the 
 # Format: (source_path, dest_path_inside_prefix)
 file_map = [
     # Setup script — at the root of the zip
-    ('.claude/skills/SETUP.sh', 'SETUP.sh'),
+    ('skill/SETUP.sh', 'SETUP.sh'),
     # Distribution docs
     ('skill/README.md', 'README.md'),
     ('skill/INSTALL.md', 'INSTALL.md'),
@@ -58,15 +58,15 @@ file_map = [
 ]
 
 # Skill directories to include (each becomes <prefix>/<skill-name>/ containing
-# SKILL.md alongside its implementation files — matches the <skills-dir>/<name>/SKILL.md
+# SKILL.md alongside its implementation files — matches the <skill-dir>/<name>/SKILL.md
 # layout Claude Code expects, so `cp -r <skill-name> ~/.claude/skills/` just works)
 # Note: local directories use underscores (pprof_analyzer), but ZIP uses hyphens (pprof-analyzer)
 # to maintain compatibility with existing skill distribution format
 dir_map = [
-    ('.claude/skills/pprof_analyzer', 'pprof-analyzer'),
-    ('.claude/skills/pprof_integrator', 'pprof-integrator'),
-    ('.claude/skills/load_test_generator', 'load-test-generator'),
-    ('.claude/skills/profiler_executor', 'profiler-executor'),
+    ('skill/pprof_analyzer', 'pprof-analyzer'),
+    ('skill/pprof_integrator', 'pprof-integrator'),
+    ('skill/load_test_generator', 'load-test-generator'),
+    ('skill/profiler_executor', 'profiler-executor'),
 ]
 
 # Skip these files/dirs when walking implementation directories
