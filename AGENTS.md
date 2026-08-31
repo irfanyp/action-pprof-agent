@@ -4,7 +4,7 @@ Guidance for AI agents (e.g. Claude Code, Cline, Copilot) working in this reposi
 
 ## Project overview
 
-**pprof-analyzer** has two implementations:
+**pprof-analyzer** has three implementations:
 
 ### 1. GitHub Action (action/scripts/analyzer.py)
 A reusable GitHub Action that:
@@ -28,11 +28,23 @@ A Claude Code skill that analyzes pprof profiles locally:
 
 Key difference: **Skill uses Claude's built-in capabilities; Action uses external LLM API.**
 
-See [`README.md`](README.md) for detailed flow of both implementations.
+### 3. MCP Server (mcp/)
+
+An MCP (Model Context Protocol) server that exposes all four skills as tools via stdio transport:
+
+1. Wraps the four skill scripts (`.claude/skills/`) without modification
+2. Registers them as MCP tools: `analyze_pprof_profile`, `integrate_pprof_endpoint`, `generate_load_test`, `run_cpu_profile`
+3. Communicates via MCP stdio protocol (works with Claude Desktop, Cline, Cursor, etc.)
+4. Each tool call invokes the corresponding skill wrapper function and returns the result
+5. Includes per-repo concurrency guard for `run_cpu_profile` (only one concurrent call per repo)
+
+Key difference: **MCP server enables any MCP-compatible agent host to use these tools without modification.**
+
+See [`README.md`](README.md) for feature comparison and [`mcp/README.md`](mcp/README.md) for setup instructions.
 
 ## Key files & structure
 
-**Skill implementations** live in `.claude/skills/<name>/` directories (e.g., `pprof-analyzer/`, `load-test-generator/`), each with a `SKILL.md` definition and Python implementation files. The **GitHub Action** code is in `action/scripts/analyzer.py`, with test fixtures in `action/scripts/tests/`. Example workflows and integration guides are in `action/` and `skill/` directories. See [README.md](README.md) for the entry point and [action/README.md](action/README.md) for GitHub Action documentation.
+**Skill implementations** live in `.claude/skills/<name>/` directories with underscores (e.g., `pprof_analyzer/`, `load_test_generator/`), each with a `SKILL.md` definition and Python implementation files. The **GitHub Action** code is in `action/scripts/analyzer.py`, with test fixtures in `action/scripts/tests/`. The **MCP Server** code is in `mcp/` with tool wrappers in `mcp/tools/` and tests in `mcp/tests/`. See [README.md](README.md) for the entry point, [action/README.md](action/README.md) for GitHub Action documentation, and [mcp/README.md](mcp/README.md) for MCP Server setup.
 
 ## Implementation Flows
 
@@ -214,13 +226,27 @@ These elements appear in both files and should stay synchronized:
    - `GIT_OPERATIONS_TIMEOUT`: 120 seconds
    - Reason: Both run same pprof-to-md and git apply operations
 
+4. **Parameter Choices** — Enum-like values for tool parameters:
+   - `reference_level` choices: `{"low", "med", "high"}` (used in `pprof_analyzer`)
+   - `--tool` choices for load test: `{"k6", "apache-bench", "wrk", "go"}` (used in `load_test_generator`)
+   - Location: `SkillConfig.VALID_REFERENCES` (skill CLI), `Literal[...]` type hints (MCP tools)
+   - Reason: Skill CLI validates via argparse `choices=`, MCP tools validate via type hints; both must stay synchronized
+   - Update strategy: When adding/removing a valid choice, update both skill argparse and MCP tool type hints
+
+5. **GitPython Dependency Pin** — For compatibility:
+   - `GitPython~=3.1.59` 
+   - Location: `.claude/skills/pprof_analyzer/requirements.txt` (skill), `mcp/requirements.txt` (MCP server)
+   - Reason: Both invoke `analyzer.py` which imports `GitPython`; MCP server runs it via the same interpreter
+   - Update strategy: If skill upgrades `GitPython`, update MCP pin to match
+
 ### When to sync changes
 
-**Always sync (change BOTH files):**
-- ✅ Update `PATCH_FENCE_PATTERN` or `SUMMARY_PATTERN` — If LLM response format changes
-- ✅ Add new reference level to `VALID_REFERENCES` — If profiling depth options expand
-- ✅ Update `prompt_template.txt` — If prompt structure changes (used by both)
-- ✅ Update pprof-to-md invocation — If command arguments change
+**Always sync (change implementations that use it):**
+- ✅ Update `PATCH_FENCE_PATTERN` or `SUMMARY_PATTERN` — If LLM response format changes (Action + Skill)
+- ✅ Add new reference level to `VALID_REFERENCES` — If profiling depth options expand (Skill CLI + MCP tool type hints)
+- ✅ Add load-test tool choice — If new tool is added (Skill CLI + MCP tool type hints)
+- ✅ Update `prompt_template.txt` — If prompt structure changes (used by Action + Skill)
+- ✅ Update pprof-to-md invocation — If command arguments change (used by all three)
 
 **Action-only changes (no sync needed):**
 - ❌ Changes to `read_file_context()`, `_execute_read_file_tool()`, `call_llm()` — Skill doesn't use agent loop
@@ -231,6 +257,10 @@ These elements appear in both files and should stay synchronized:
 **Skill-only changes (no sync needed):**
 - ❌ Changes to `smart_select_files()`, `find_imports_in_file()` — Action uses simpler file listing
 - ❌ Changes to artifact output location (`.ai_output/` vs `artifacts/`) — Directories differ by design
+
+**MCP-only changes (no sync needed):**
+- ❌ Changes to concurrency lock logic in `profiler_executor.py` — MCP-specific requirement for tool safeguarding
+- ❌ Changes to tool docstrings — MCP uses them to describe tools to agent hosts (Action/Skill don't need them)
 
 **Prompt template (single source of truth):**
 - **Source**: [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt) is the **canonical version**

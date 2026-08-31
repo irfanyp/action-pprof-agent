@@ -31,9 +31,9 @@ cd "$REPO_ROOT"
 
 # Sync prompt template from action (single source of truth)
 echo "Syncing prompt template from action/scripts/ ..."
-mkdir -p .claude/skills/pprof-analyzer/prompts
+mkdir -p .claude/skills/pprof_analyzer/prompts
 cp action/scripts/prompts/prompt_template.txt \
-   .claude/skills/pprof-analyzer/prompts/prompt_template.txt
+   .claude/skills/pprof_analyzer/prompts/prompt_template.txt
 
 python3 << 'PYTHON_EOF'
 import zipfile
@@ -60,11 +60,13 @@ file_map = [
 # Skill directories to include (each becomes <prefix>/<skill-name>/ containing
 # SKILL.md alongside its implementation files — matches the <skills-dir>/<name>/SKILL.md
 # layout Claude Code expects, so `cp -r <skill-name> ~/.claude/skills/` just works)
+# Note: local directories use underscores (pprof_analyzer), but ZIP uses hyphens (pprof-analyzer)
+# to maintain compatibility with existing skill distribution format
 dir_map = [
-    ('.claude/skills/pprof-analyzer', 'pprof-analyzer'),
-    ('.claude/skills/pprof-integrator', 'pprof-integrator'),
-    ('.claude/skills/load-test-generator', 'load-test-generator'),
-    ('.claude/skills/profiler-executor', 'profiler-executor'),
+    ('.claude/skills/pprof_analyzer', 'pprof-analyzer'),
+    ('.claude/skills/pprof_integrator', 'pprof-integrator'),
+    ('.claude/skills/load_test_generator', 'load-test-generator'),
+    ('.claude/skills/profiler_executor', 'profiler-executor'),
 ]
 
 # Skip these files/dirs when walking implementation directories

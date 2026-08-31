@@ -2,7 +2,7 @@
 
 Analyze Go pprof profiles and generate performance optimization patches using LLM-powered analysis.
 
-**Two implementations — choose your path:**
+**Three implementations — choose your path:**
 
 ---
 
@@ -63,17 +63,37 @@ Analyze Go pprof profiles and generate performance optimization patches using LL
 
 ---
 
-## 📊 Skill vs. Action Comparison
+### For AI Agents via MCP (Claude Desktop, Cline, Cursor, etc.)
+**👉 [`mcp/README.md`](mcp/README.md)**
 
-| Feature | Claude Code Skill | GitHub Action |
-|---------|------------------|----------------|
-| **Invocation** | `/pprof-analyze` in Claude Code | Workflow trigger in GitHub |
-| **Setup Time** | 10 seconds | 5 minutes |
-| **Analysis Speed** | 15-35 seconds | 2-5 minutes |
-| **Requires API Keys** | No | Yes |
-| **PR Creation** | Manual | Automatic |
-| **LLM Loop** | Single-turn | Multi-turn (agent loop) |
-| **Use Case** | Interactive local analysis | Production automation |
+- 🌐 Works with any MCP-compatible AI agent host
+- 🔧 Same four skills wrapped as MCP tools
+- ⚡ Instant integration (no agent setup needed)
+- 🤝 Share across teams and tools
+- 📱 Claude Desktop, Cline, Cursor support
+
+```bash
+# Register locally
+claude mcp add --transport stdio pprof-analyzer --scope project -- \
+  python3 $(pwd)/mcp/main.py
+```
+
+**Best for:** Teams using multiple AI agents, sharing analysis across tools
+
+---
+
+## 📊 Implementation Comparison
+
+| Feature | Claude Code Skill | GitHub Action | MCP Server |
+|---------|------------------|----------------|-----------|
+| **Invocation** | `/pprof-analyzer` in Claude Code | GitHub workflow | Any MCP agent host |
+| **Supported Hosts** | Claude Code only | GitHub only | Claude Desktop, Cline, Cursor, etc. |
+| **Setup Time** | 10 seconds | 5 minutes | 2 minutes (registration) |
+| **Analysis Speed** | 15-35 seconds | 2-5 minutes | 15-35 seconds |
+| **Requires API Keys** | No | Yes | No |
+| **PR Creation** | Manual | Automatic | Via agent host |
+| **LLM Loop** | Single-turn | Multi-turn | Single-turn |
+| **Use Case** | Interactive local analysis | Production automation | Multi-agent teams |
 
 ---
 
