@@ -64,21 +64,31 @@ Analyze Go pprof profiles and generate performance optimization patches using LL
 ---
 
 ### For AI Agents via MCP (Claude Desktop, Cline, Cursor, etc.)
-**👉 [`mcp/README.md`](mcp/README.md)**
+**👉 [`MCP_SETUP.md`](MCP_SETUP.md) & [`mcp_tools/README.md`](mcp_tools/README.md)**
 
-- 🌐 Works with any MCP-compatible AI agent host
-- 🔧 Same four skills wrapped as MCP tools
-- ⚡ Instant integration (no agent setup needed)
-- 🤝 Share across teams and tools
-- 📱 Claude Desktop, Cline, Cursor support
+**Two transport options:**
 
+**Option A: Stdio** (Single user, local)
 ```bash
-# Register locally
+python3 mcp_server.py
 claude mcp add --transport stdio pprof-analyzer --scope project -- \
-  python3 $(pwd)/mcp/main.py
+  python3 $(pwd)/mcp_server.py
 ```
 
-**Best for:** Teams using multiple AI agents, sharing analysis across tools
+**Option B: HTTP/SSE** (Multiple users, team collaboration) ⭐
+```bash
+python3 mcp_server_http.py              # Runs on http://localhost:8000
+# Multiple agents connect to: http://localhost:8000/sse
+```
+
+**Features:**
+- 🌐 Works with any MCP-compatible AI agent host
+- 🔧 Same four skills wrapped as MCP tools
+- 🤝 Share single server across team (HTTP option)
+- 📱 Claude Desktop, Cline, Cursor, VSCode support
+- ⚡ Concurrent client support (HTTP option)
+
+**Best for:** Teams using multiple AI agents, sharing analysis tools
 
 ---
 

@@ -28,7 +28,7 @@ A Claude Code skill that analyzes pprof profiles locally:
 
 Key difference: **Skill uses Claude's built-in capabilities; Action uses external LLM API.**
 
-### 3. MCP Server (mcp/)
+### 3. MCP Server (mcp_tools/)
 
 An MCP (Model Context Protocol) server that exposes all four skills as tools via stdio transport:
 
@@ -40,11 +40,11 @@ An MCP (Model Context Protocol) server that exposes all four skills as tools via
 
 Key difference: **MCP server enables any MCP-compatible agent host to use these tools without modification.**
 
-See [`README.md`](README.md) for feature comparison and [`mcp/README.md`](mcp/README.md) for setup instructions.
+See [`README.md`](README.md) for feature comparison and [`mcp_tools/README.md`](mcp_tools/README.md) for setup instructions.
 
 ## Key files & structure
 
-**Skill implementations** live in `skill/<name>/` directories with underscores (e.g., `pprof_analyzer/`, `load_test_generator/`), each with a `SKILL.md` definition and Python implementation files. The **GitHub Action** code is in `action/scripts/analyzer.py`, with test fixtures in `action/scripts/tests/`. The **MCP Server** code is in `mcp/` with tool wrappers in `mcp/tools/` and tests in `mcp/tests/`. See [README.md](README.md) for the entry point, [action/README.md](action/README.md) for GitHub Action documentation, and [mcp/README.md](mcp/README.md) for MCP Server setup.
+**Skill implementations** live in `skill/<name>/` directories with underscores (e.g., `pprof_analyzer/`, `load_test_generator/`), each with a `SKILL.md` definition and Python implementation files. The **GitHub Action** code is in `action/scripts/analyzer.py`, with test fixtures in `action/scripts/tests/`. The **MCP Server** code is in `mcp_tools/` with tool wrappers in `mcp_tools/tools/` and tests in `mcp_tools/tests/`. See [README.md](README.md) for the entry point, [action/README.md](action/README.md) for GitHub Action documentation, and [mcp_tools/README.md](mcp_tools/README.md) for MCP Server setup.
 
 ## Implementation Flows
 
@@ -235,7 +235,7 @@ These elements appear in both files and should stay synchronized:
 
 5. **GitPython Dependency Pin** — For compatibility:
    - `GitPython~=3.1.59` 
-   - Location: `skill/pprof_analyzer/requirements.txt` (skill), `mcp/requirements.txt` (MCP server)
+   - Location: `skill/pprof_analyzer/requirements.txt` (skill), `mcp_tools/requirements.txt` (MCP server)
    - Reason: Both invoke `analyzer.py` which imports `GitPython`; MCP server runs it via the same interpreter
    - Update strategy: If skill upgrades `GitPython`, update MCP pin to match
 

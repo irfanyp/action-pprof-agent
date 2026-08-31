@@ -7,15 +7,19 @@ name = "pprof-analyzer"
 version = "0.1.0"
 description = "Analyzer for CPU profiles with LLM-powered optimization suggestions"
 requires-python = ">=3.10"
-dependencies = ["GitPython~=3.1.59"]
+dependencies = [
+    "GitPython~=3.1.59",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.23",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["skill*", "mcp*"]
+include = ["skill*", "mcp_tools*"]
 exclude = ["action*", "node_modules*", "docs*"]
 
 [tool.pytest.ini_options]
-testpaths = ["action/scripts/tests", "mcp/tests"]
+testpaths = ["action/scripts/tests", "mcp_tools/tests"]
 pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

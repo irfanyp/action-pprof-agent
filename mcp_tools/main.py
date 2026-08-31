@@ -103,8 +103,12 @@ def run_cpu_profile_tool(
 
 
 async def main():
-    """Create and run the MCP server."""
+    """Run the MCP server with stdio transport."""
     await server.run_stdio_async()
+
+
+# Export server for use in other transports (HTTP, etc.)
+__all__ = ["server", "main"]
 
 
 if __name__ == "__main__":

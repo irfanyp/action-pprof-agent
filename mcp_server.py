@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MCP Server entry point for pprof-analyzer.
+MCP Server entry point for pprof-analyzer (Stdio transport).
 
 Runs the Model Context Protocol server that exposes pprof analysis tools
 to Claude Desktop, Cline, Cursor, and other MCP-compatible agents.
@@ -22,9 +22,11 @@ Registration (Claude Desktop):
         }
       }
     }
+
+For HTTP/SSE transport (multiple users), use mcp_server_http.py instead.
 """
 import asyncio
-from mcp.main import main
+from mcp_tools.main import main
 
 if __name__ == "__main__":
     asyncio.run(main())
