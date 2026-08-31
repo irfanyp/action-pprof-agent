@@ -29,8 +29,6 @@ import argparse
 import asyncio
 import logging
 import sys
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from uvicorn import Config, Server
@@ -45,24 +43,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Create FastAPI app with lifespan
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """FastAPI lifespan context manager for startup/shutdown."""
-    logger.info("=" * 60)
-    logger.info("pprof-analyzer MCP Server starting...")
-    logger.info("=" * 60)
-    yield
-    logger.info("=" * 60)
-    logger.info("pprof-analyzer MCP Server stopping...")
-    logger.info("=" * 60)
-
-
 app = FastAPI(
     title="pprof-analyzer MCP Server",
     description="LLM-powered Go pprof profile analyzer via Model Context Protocol",
     version="0.1.0",
-    lifespan=lifespan,
 )
 
 
