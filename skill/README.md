@@ -4,7 +4,18 @@ Analyze Go pprof profiles and generate performance optimization patches in Claud
 
 This is a **standalone Claude skill** version of the [pprof-analyzer GitHub Action](https://github.com/irfanyusupramono/pprof-analyzer), designed to work locally without requiring GitHub Actions or a remote analyzer service.
 
-**Note on folder naming:** The distributed ZIP uses hyphenated names (e.g., `pprof-analyzer`, `load-test-generator`) for backward compatibility. In the source repository, skill directories use underscores (e.g., `pprof_analyzer`, `load_test_generator`) to enable Python imports in the MCP server and other integrations.
+> **Important: Source Repository vs Distributed Form**
+>
+> **If you're reading this in the source repository (GitHub):**
+> - Skill directories use underscores: `skill/pprof_analyzer/`, `skill/load_test_generator/`, etc.
+> - Setup scripts are at `skill/build-zip.sh`, `skill/SETUP.sh`
+> - Tests run from `skill/<name>/tests/`
+>
+> **If you've extracted the distributed ZIP:**
+> - Directories use hyphens: `~/.claude/skills/pprof-analyzer/`, etc.
+> - Directories are installed to `~/.claude/skills/`
+>
+> **Note on folder naming:** The distributed ZIP uses hyphenated names (e.g., `pprof-analyzer`, `load-test-generator`) for backward compatibility. In the source repository, skill directories use underscores (e.g., `pprof_analyzer`, `load_test_generator`) to enable Python imports in the MCP server and other integrations.
 
 ## Quick Start
 
@@ -50,7 +61,9 @@ cat .ai_output/patch.diff
 git apply .ai_output/patch.diff
 ```
 
-### Install (Automatic)
+### Install (Automatic) — From Distributed ZIP
+
+If you have the distributed `pprof-analyzer-skill.zip`:
 
 ```bash
 unzip pprof-analyzer-skill.zip
@@ -62,6 +75,18 @@ This automatically installs:
 - ✅ Skill files to `~/.claude/skills/`
 - ✅ Python modules (GitPython)
 - ✅ Node modules (pprof-to-md)
+
+### Install (From Source Repository)
+
+If you're in the source repository, use the build script:
+
+```bash
+cd /path/to/pprof-analyzer
+skill/build-zip.sh          # Generates pprof-analyzer-skill.zip
+unzip skill/pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/
+./SETUP.sh install
+```
 
 ## The Four Skills
 
@@ -203,7 +228,7 @@ Based on analysis in .ai_output/summary.md
 
 ### 1. pprof-integrator — Add pprof to Your Service
 
-**Purpose:** Integrate `net/http/pprof` endpoint into a Go service using the [action/pprof_integration.md](pprof_integration.md) guide.
+**Purpose:** Integrate `net/http/pprof` endpoint into a Go service using the [action/pprof_integration.md](../action/pprof_integration.md) guide.
 
 **Usage:**
 ```bash
@@ -423,7 +448,7 @@ go tool pprof http://localhost:9987/debug/pprof/profile
 (pprof) save /tmp/cpu.prof
 ```
 
-See [pprof_integration.md](pprof_integration.md) for how to integrate pprof into your Go service, or use `pprof-integrator` skill for automated integration.
+See [action/pprof_integration.md](../action/pprof_integration.md) for how to integrate pprof into your Go service, or use `pprof-integrator` skill for automated integration.
 
 ## No API Keys Required
 
@@ -450,7 +475,7 @@ cd pprof-analyzer-skill/
 To rebuild the ZIP after making changes, run from the repository root:
 
 ```bash
-.claude/skills/build-zip.sh
+skill/build-zip.sh
 ```
 
 ## Development
@@ -461,7 +486,13 @@ For developers working in the source repository:
 
 ```bash
 pip install pytest
-pytest .claude/skills/pprof_analyzer/tests/
+pytest skill/pprof_analyzer/tests/
+```
+
+To run all skill tests:
+
+```bash
+pytest skill/*/tests/
 ```
 
 **Note:** Skill directories use underscores in the source repository (e.g., `pprof_analyzer`) to support Python imports. In the distributed ZIP package, they use hyphens (e.g., `pprof-analyzer`) for backward compatibility.

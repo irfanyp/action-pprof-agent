@@ -11,6 +11,17 @@ pip install -e .
 
 ---
 
+## Architecture Note
+
+The MCP server has three layers:
+1. **`mcp_tools/main.py`** — Core MCP server implementation
+2. **`mcp_server.py`** — Thin wrapper that delegates to `mcp_tools/main.py` for stdio transport
+3. **`mcp_server_http.py`** — Adds HTTP/SSE transport for team collaboration
+
+When using either Option A or B below, you're using the same core server with different transports.
+
+---
+
 ## Quick Start
 
 ### Option A: Stdio Transport (Single User)
@@ -19,6 +30,8 @@ Best for: Local development, single agent
 ```bash
 python3 mcp_server.py
 ```
+
+This runs the server with stdio transport (stdin/stdout IPC). Ideal for local development.
 
 Register with Claude Code:
 ```bash
@@ -37,6 +50,8 @@ python3 mcp_server_http.py              # http://localhost:8000
 python3 mcp_server_http.py --port 9000  # Custom port
 python3 mcp_server_http.py --host 0.0.0.0  # Listen on all interfaces
 ```
+
+This runs the server with HTTP/SSE transport, allowing multiple concurrent clients to connect via a network endpoint.
 
 Access:
 - **MCP Endpoint:** `http://localhost:8000/sse`

@@ -30,7 +30,7 @@ python3 -m venv .venv
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 
 # Install dependencies
-pip install -r mcp/requirements.txt
+pip install -r mcp_tools/requirements.txt
 ```
 
 ## Testing Locally
@@ -38,13 +38,13 @@ pip install -r mcp/requirements.txt
 Run the test suite:
 
 ```bash
-pytest mcp/tests/ -v
+pytest mcp_tools/tests/ -v
 ```
 
 Launch MCP Inspector for manual testing:
 
 ```bash
-mcp dev mcp/main.py
+mcp dev mcp_tools/main.py
 ```
 
 This opens an interactive MCP Inspector where you can call tools directly.
@@ -57,7 +57,7 @@ Register the server with the local project:
 
 ```bash
 claude mcp add --transport stdio pprof-analyzer --scope project -- \
-  python3 $(pwd)/mcp/main.py
+  python3 $(pwd)/mcp_tools/main.py
 ```
 
 Tools will appear as:
@@ -87,7 +87,7 @@ Edit `~/.claude_desktop/claude_desktop_config.json` (or `%APPDATA%\Claude\claude
   "mcpServers": {
     "pprof-analyzer": {
       "command": "python3",
-      "args": ["/absolute/path/to/pprof-analyzer/mcp/main.py"]
+      "args": ["/absolute/path/to/pprof-analyzer/mcp_tools/main.py"]
     }
   }
 }
@@ -104,7 +104,7 @@ Create `.cline_mcp_settings.json` in your project root:
   "mcpServers": {
     "pprof-analyzer": {
       "command": "python3",
-      "args": ["/absolute/path/to/pprof-analyzer/mcp/main.py"]
+      "args": ["/absolute/path/to/pprof-analyzer/mcp_tools/main.py"]
     }
   }
 }
@@ -151,10 +151,10 @@ All tests are mocked (no real skill scripts are called).
 
 ### Adding a New Tool
 
-1. Create a wrapper function in the skill file (`.claude/skills/<name>/`)
-2. Create a tool module in `mcp/tools/<name>.py`
-3. Import it in `mcp/main.py` via the tools loading loop
-4. Add test cases in `mcp/tests/test_<name>.py`
+1. Create a wrapper function in the skill file (`skill/<name>/`)
+2. Create a tool module in `mcp_tools/tools/<name>.py`
+3. Import it in `mcp_tools/main.py` via the tools loading loop
+4. Add test cases in `mcp_tools/tests/test_<name>.py`
 
 ## Related
 
