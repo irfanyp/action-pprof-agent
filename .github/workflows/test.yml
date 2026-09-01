@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --no-cache-dir -r action/scripts/requirements-dev.txt
-          pip install --no-cache-dir -r mcp/requirements.txt pytest pytest-mock
+          pip install --no-cache-dir -r mcp_tools/requirements.txt pytest pytest-mock
 
       - name: Run tests
         run: |
