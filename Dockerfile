@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir \
     fastapi uvicorn[standard]
 
 # Copy application code
+COPY prompts/ ./prompts/
 COPY mcp_tools/ ./mcp_tools/
 COPY skill/ ./skill/
 COPY action/ ./action/

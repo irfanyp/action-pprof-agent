@@ -263,13 +263,16 @@ These elements appear in both files and should stay synchronized:
 - ❌ Changes to tool docstrings — MCP uses them to describe tools to agent hosts (Action/Skill don't need them)
 
 **Prompt template (single source of truth):**
-- **Source**: [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt) is the **canonical version**
-- **Sync mechanism**: [skill/build-zip.sh](skill/build-zip.sh) automatically copies it to [skill/pprof-analyzer/prompts/prompt_template.txt](skill/pprof-analyzer/prompts/prompt_template.txt) before creating the ZIP
+- **Location**: [prompts/prompt_template.txt](prompts/prompt_template.txt) at the repository root — the canonical version used by all implementations.
+- **Access across implementations**:
+  - **Skill** ([skill/pprof_analyzer/analyzer.py](skill/pprof_analyzer/analyzer.py)): Reads from `../../prompts/prompt_template.txt`
+  - **Action** ([action/scripts/analyzer.py](action/scripts/analyzer.py)): Reads from `../../../prompts/prompt_template.txt`
+  - **MCP Server** ([mcp_tools/](mcp_tools/)): Reads from `../../prompts/prompt_template.txt`
+- **Container/distribution**: The [Dockerfile](Dockerfile) and [skill/build-zip.sh](skill/build-zip.sh) both include `prompts/` so it's available in containerized and standalone distributed environments.
 - **Workflow**: When updating the prompt template:
-  1. Edit [action/scripts/prompts/prompt_template.txt](action/scripts/prompts/prompt_template.txt) only
-  2. Run [skill/build-zip.sh](skill/build-zip.sh) — it will sync the skill version automatically
-  3. Commit both the prompt template change and the regenerated ZIP
-  4. Test both implementations (action and skill) with sample profiles
+  1. Edit [prompts/prompt_template.txt](prompts/prompt_template.txt) only
+  2. Commit the change — all three implementations will automatically use the updated version
+  3. Test action, skill, and MCP server with sample profiles
 
 ### Regenerating the skill ZIP file
 

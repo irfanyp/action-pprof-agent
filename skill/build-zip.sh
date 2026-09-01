@@ -29,12 +29,6 @@ echo "Building skill ZIP: $ZIP_PATH"
 
 cd "$REPO_ROOT"
 
-# Sync prompt template from action (single source of truth)
-echo "Syncing prompt template from action/scripts/ ..."
-mkdir -p skill/pprof_analyzer/prompts
-cp action/scripts/prompts/prompt_template.txt \
-   skill/pprof_analyzer/prompts/prompt_template.txt
-
 python3 << 'PYTHON_EOF'
 import zipfile
 import os
@@ -63,6 +57,7 @@ file_map = [
 # Note: local directories use underscores (pprof_analyzer), but ZIP uses hyphens (pprof-analyzer)
 # to maintain compatibility with existing skill distribution format
 dir_map = [
+    ('prompts', 'prompts'),
     ('skill/pprof_analyzer', 'pprof-analyzer'),
     ('skill/pprof_integrator', 'pprof-integrator'),
     ('skill/load_test_generator', 'load-test-generator'),

@@ -395,7 +395,9 @@ def run_analyzer(profile_path: str | Path, repo_path: str | Path, reference_leve
     source_code = "".join(source_code_parts)
 
     # Step 5: Build and return prompt
-    template_path = Path(__file__).parent / "prompts" / "prompt_template.txt"
+    # Read from shared prompts directory (root-level, accessible by all implementations)
+    repo_root = repo_path if isinstance(repo_path, Path) else Path(repo_path)
+    template_path = repo_root / "prompts" / "prompt_template.txt"
     prompt = build_prompt(template_path, reference_level, analyzer_result, source_code)
 
     return prompt
