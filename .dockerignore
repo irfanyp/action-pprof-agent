@@ -12,6 +12,8 @@ node_modules
 .env
 .env.local
 *.md
+!skill/**/pprof_integration.md
+!skill/**/SKILL.md
 .DS_Store
 venv
 env

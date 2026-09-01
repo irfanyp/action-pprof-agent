@@ -7,10 +7,10 @@ WORKDIR /app
 RUN useradd -m -u 1000 mcp
 
 # Install dependencies
-COPY mcp_tools/requirements.txt .
+COPY mcp_tools/requirements.txt ./requirements.txt
 COPY pyproject.toml .
 RUN pip install --no-cache-dir \
-    -r mcp_tools/requirements.txt \
+    -r requirements.txt \
     fastapi uvicorn[standard]
 
 # Copy application code

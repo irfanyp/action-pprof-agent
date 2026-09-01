@@ -7,10 +7,28 @@ Produces cpu.prof for pprof-analyzer skill.
 from __future__ import annotations
 
 import argparse
+import shlex
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+
+def _wait_for_service(port: int, timeout: int = 10) -> bool:
+    """Poll the service's HTTP port until it responds or the timeout elapses."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(f"http://localhost:{port}/", timeout=1)
+            return True
+        except urllib.error.HTTPError:
+            # Got an HTTP response (even a non-2xx one) — the service is up.
+            return True
+        except Exception:
+            time.sleep(0.2)
+    return False
 
 
 def run_profiler(
@@ -72,12 +90,13 @@ def run_profiler(
         text=True,
     )
 
-    # Wait for service to start
-    time.sleep(2)
-
-    if service_proc.poll() is not None:
+    # Wait for service to become ready (bounded poll instead of a fixed sleep,
+    # since startup time varies with DB connections, migrations, etc.)
+    if not _wait_for_service(port, timeout=10):
+        if service_proc.poll() is None:
+            service_proc.terminate()
         stdout, stderr = service_proc.communicate()
-        raise RuntimeError(f"Service failed to start\n{stderr}")
+        raise RuntimeError(f"Service did not become ready on port {port} within timeout\n{stderr}")
 
     try:
         # Step 3: Run profiler and load test in parallel
@@ -103,8 +122,7 @@ def run_profiler(
         load_proc = None
         if load_cmd:
             load_proc = subprocess.Popen(
-                load_cmd,
-                shell=True,
+                shlex.split(load_cmd),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -124,9 +142,15 @@ done
             )
 
         # Wait for profiler to finish
-        profiler_returncode = profiler_proc.wait(timeout=duration + 10)
-        if profiler_returncode != 0:
-            pass  # Warning logged but continue
+        try:
+            profiler_returncode = profiler_proc.wait(timeout=duration + 10)
+            if profiler_returncode != 0:
+                pass  # Warning logged but continue
+        except subprocess.TimeoutExpired:
+            profiler_proc.kill()
+            profiler_proc.wait()
+            load_proc.kill()
+            raise RuntimeError(f"Profiler did not finish within {duration + 10}s and was killed")
 
         # Wait for load test to finish (with timeout)
         try:

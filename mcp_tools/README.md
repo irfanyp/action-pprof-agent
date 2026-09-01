@@ -4,7 +4,7 @@ An MCP (Model Context Protocol) server that exposes the four pprof-analyzer skil
 
 ## What is this?
 
-This MCP server wraps the four existing skills (`.claude/skills/`) without modification, exposing them as MCP tools:
+This MCP server wraps the four existing skills (`skill/`) without modification, exposing them as MCP tools:
 
 1. **analyze_pprof_profile** — Analyze Go pprof CPU profiles and generate optimization patches
 2. **integrate_pprof_endpoint** — Add pprof endpoint integration guidance to a Go service
@@ -131,7 +131,7 @@ The `run_cpu_profile` tool is guarded by a per-repo concurrency lock within a si
 ## Troubleshooting
 
 **"Module not found" error:**
-Ensure skills path is in `sys.path`. The server adds `.claude/skills/` automatically.
+Ensure the repository root is on `sys.path` so `skill/` and `mcp_tools/` can be imported.
 
 **`run_cpu_profile` timeouts:**
 Increase the timeout in your agent's configuration (e.g., 300 seconds for Claude Code).
@@ -144,7 +144,7 @@ Profiles are written to `.ai_output/cpu.prof` relative to the repo path, not the
 ### Running Tests
 
 ```bash
-pytest mcp/tests/ -v
+pytest mcp_tools/tests/ -v
 ```
 
 All tests are mocked (no real skill scripts are called).
@@ -153,11 +153,11 @@ All tests are mocked (no real skill scripts are called).
 
 1. Create a wrapper function in the skill file (`skill/<name>/`)
 2. Create a tool module in `mcp_tools/tools/<name>.py`
-3. Import it in `mcp_tools/main.py` via the tools loading loop
+3. Import it in `mcp_tools/main.py` and register it with `@server.tool()`
 4. Add test cases in `mcp_tools/tests/test_<name>.py`
 
 ## Related
 
 - [Root README](../README.md) — Overview of three implementations
 - [AGENTS.md](../AGENTS.md) — Architecture and design decisions
-- [Skills documentation](../.claude/skills/) — Individual skill descriptions
+- [Skills documentation](../skill/) — Individual skill descriptions

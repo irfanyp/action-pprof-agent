@@ -5,7 +5,7 @@ MCP Server with HTTP/SSE transport for multiple concurrent clients.
 This server allows multiple AI agents (Claude Desktop, Cline, Cursor, etc.)
 to connect to a single pprof-analyzer MCP instance over HTTP.
 
-The tool definitions are shared with mcp/main.py to avoid duplication.
+The tool definitions are shared with mcp_tools/main.py to avoid duplication.
 
 Usage:
     python3 mcp_server_http.py              # Runs on http://localhost:8000
@@ -28,12 +28,36 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 from uvicorn import Config, Server
 
 from mcp_tools.main import server  # Import shared server with all tools defined
+
+API_KEY_NAME = "X-API-Key"
+API_KEY_EXEMPT_PATHS = {"/health"}
+
+
+class ApiKeyMiddleware(BaseHTTPMiddleware):
+    """Require a matching X-API-Key header when MCP_API_KEY is set.
+
+    The mounted MCP tools (notably run_cpu_profile) build, run, and shell out
+    on the host, so this server must not be left reachable by any client that
+    can hit the port. When MCP_API_KEY is unset, auth is skipped (e.g. local
+    development), which is why deployments should always set it.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        expected = os.environ.get("MCP_API_KEY")
+        if expected and request.url.path not in API_KEY_EXEMPT_PATHS:
+            if request.headers.get(API_KEY_NAME) != expected:
+                return JSONResponse({"detail": "Invalid or missing API key"}, status_code=403)
+        return await call_next(request)
+
 
 # Configure logging
 logging.basicConfig(
@@ -48,6 +72,7 @@ app = FastAPI(
     description="LLM-powered Go pprof profile analyzer via Model Context Protocol",
     version="0.1.0",
 )
+app.add_middleware(ApiKeyMiddleware)
 
 
 @app.get("/")
@@ -83,29 +108,6 @@ async def health_check():
     }
 
 
-@app.get("/sse")
-async def sse_endpoint():
-    """MCP SSE transport endpoint for connecting agents.
-
-    This endpoint implements the MCP stdio-compatible protocol over HTTP using
-    Server-Sent Events (SSE). Multiple clients can connect simultaneously.
-
-    Agents (Claude Desktop, Cline, Cursor, etc.) connect here to access MCP tools.
-    """
-    logger.info("New MCP client connected via SSE")
-
-    async def event_stream():
-        """Stream MCP messages as SSE events."""
-        try:
-            # Run server with SSE transport (synchronous call in async context)
-            server.run("sse")
-        except Exception as e:
-            logger.error(f"SSE transport error: {e}", exc_info=True)
-            yield f"event: error\ndata: {str(e)}\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -131,6 +133,17 @@ Examples:
         help="Port to listen on (default: 8000)",
     )
     args = parser.parse_args()
+
+    if not os.environ.get("MCP_API_KEY"):
+        logger.warning(
+            "MCP_API_KEY is not set — /sse is unauthenticated. Anyone who can reach "
+            "this port can invoke run_cpu_profile, which builds and runs arbitrary "
+            "repo code on this host. Set MCP_API_KEY before binding to a non-local host."
+        )
+
+    # Mount the MCP SDK's native SSE transport as a sub-app. It defines its own
+    # /sse and /messages/ routes; ApiKeyMiddleware on the outer app covers them too.
+    app.mount("/", server.sse_app(host=args.host))
 
     logger.info("=" * 60)
     logger.info("pprof-analyzer MCP Server Configuration")

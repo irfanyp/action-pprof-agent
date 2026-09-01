@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
 
-from skill.pprof_analyzer.analyzer import run_analyzer
-from skill.pprof_integrator.coordinator import run_integrator
-from skill.load_test_generator.coordinator import run_load_test_generator
-from skill.profiler_executor.profiler import run_profiler
+from mcp_tools.tools.pprof_analyzer import analyze_pprof_profile
+from mcp_tools.tools.pprof_integrator import integrate_pprof_endpoint
+from mcp_tools.tools.load_test_generator import generate_load_test
+from mcp_tools.tools.profiler_executor import run_cpu_profile
 
 from mcp.server import MCPServer
 
@@ -17,7 +18,7 @@ server = MCPServer("pprof-analyzer")
 def analyze_pprof_profile_tool(
     profile_path: str,
     repo_path: str,
-    reference_level: str = "med",
+    reference_level: Literal["low", "med", "high"] = "med",
 ) -> str:
     """Analyze a Go pprof CPU profile and generate performance optimization guidance.
 
@@ -33,7 +34,7 @@ def analyze_pprof_profile_tool(
     Returns:
         Markdown prompt for LLM analysis
     """
-    return run_analyzer(profile_path, repo_path, reference_level)
+    return analyze_pprof_profile(profile_path, repo_path, reference_level)
 
 
 @server.tool()
@@ -50,13 +51,13 @@ def integrate_pprof_endpoint_tool(repo_path: str) -> str:
     Returns:
         Markdown prompt for LLM to generate pprof integration code
     """
-    return run_integrator(repo_path)
+    return integrate_pprof_endpoint(repo_path)
 
 
 @server.tool()
 def generate_load_test_tool(
     repo_path: str,
-    tool: str = "k6",
+    tool: Literal["k6", "apache-bench", "wrk", "go"] = "k6",
 ) -> str:
     """Generate a load test script for a Go service.
 
@@ -71,7 +72,7 @@ def generate_load_test_tool(
     Returns:
         Markdown prompt for LLM to generate load test script
     """
-    return run_load_test_generator(repo_path, tool)
+    return generate_load_test(repo_path, tool)
 
 
 @server.tool()
@@ -99,7 +100,7 @@ def run_cpu_profile_tool(
     Returns:
         Profiling summary + location where profile was written
     """
-    return run_profiler(repo_path, port, load_cmd, duration)
+    return run_cpu_profile(repo_path, port=port, load_cmd=load_cmd, duration=duration)
 
 
 async def main():

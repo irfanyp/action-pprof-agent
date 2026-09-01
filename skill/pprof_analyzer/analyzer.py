@@ -352,6 +352,16 @@ def run_analyzer(profile_path: str | Path, repo_path: str | Path, reference_leve
         ValueError: If inputs are invalid
         FileNotFoundError: If profile or repo not found
     """
+    prompt, _analyzer_result = _run_analyzer(profile_path, repo_path, reference_level)
+    return prompt
+
+
+def _run_analyzer(profile_path: str | Path, repo_path: str | Path, reference_level: str) -> tuple[str, str]:
+    """Core analyzer logic, returning both the prompt and the pprof markdown.
+
+    Split out from run_analyzer() so main() can reuse the markdown for artifact
+    writing without invoking the pprof-to-md subprocess a second time.
+    """
     profile_path = Path(profile_path)
     repo_path = Path(repo_path)
     reference_level = reference_level.lower()
@@ -395,12 +405,12 @@ def run_analyzer(profile_path: str | Path, repo_path: str | Path, reference_leve
     source_code = "".join(source_code_parts)
 
     # Step 5: Build and return prompt
-    # Read from shared prompts directory (root-level, accessible by all implementations)
-    repo_root = repo_path if isinstance(repo_path, Path) else Path(repo_path)
-    template_path = repo_root / "prompts" / "prompt_template.txt"
+    # The template is part of pprof-analyzer, not the target repo being analyzed —
+    # resolve it relative to this file's location instead of repo_path.
+    template_path = Path(__file__).resolve().parents[2] / "prompts" / "prompt_template.txt"
     prompt = build_prompt(template_path, reference_level, analyzer_result, source_code)
 
-    return prompt
+    return prompt, analyzer_result
 
 
 def main() -> int:
@@ -424,7 +434,7 @@ def main() -> int:
         log(f"Reference level: {reference_level}")
 
         # Run analyzer
-        prompt = run_analyzer(profile_path, repo_path, reference_level)
+        prompt, analyzer_result = _run_analyzer(profile_path, repo_path, reference_level)
 
         # Output prompt
         log("=" * 70)
@@ -434,7 +444,6 @@ def main() -> int:
         log("=" * 70)
 
         # Write artifacts for reference
-        analyzer_result = convert_pprof_to_markdown(Path(profile_path))
         write_artifacts("", "", analyzer_result, prompt)
         log("✓ Wrote prompt to .ai_output/prompt.txt")
 

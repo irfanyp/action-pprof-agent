@@ -54,8 +54,12 @@ def run_cpu_profile(
             f"run_cpu_profile is already running for {repo_path}; wait for it to finish before calling again"
         )
 
+    real_path = os.path.realpath(repo_path)
     try:
         summary = run_profiler(repo_path, port=port, load_cmd=load_cmd, duration=duration)
         return summary + f"\n\nProfile written to: {repo_path}/.ai_output/cpu.prof"
     finally:
         lock.release()
+        with _locks_lock:
+            if _locks.get(real_path) is lock and not lock.locked():
+                del _locks[real_path]
