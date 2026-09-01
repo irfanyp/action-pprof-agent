@@ -30,6 +30,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
-# Run server (allow custom host/port via environment or args)
+# Run server (default to localhost; use MCP_API_KEY + --host 0.0.0.0 for network access)
 ENTRYPOINT ["python", "mcp_server_http.py"]
-CMD ["--host", "0.0.0.0", "--port", "8000"]
+CMD ["--host", "127.0.0.1", "--port", "8000"]

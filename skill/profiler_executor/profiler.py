@@ -95,6 +95,11 @@ def run_profiler(
     if not _wait_for_service(port, timeout=10):
         if service_proc.poll() is None:
             service_proc.terminate()
+            try:
+                service_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                service_proc.kill()
+                service_proc.wait()
         stdout, stderr = service_proc.communicate()
         raise RuntimeError(f"Service did not become ready on port {port} within timeout\n{stderr}")
 
@@ -145,7 +150,7 @@ done
         try:
             profiler_returncode = profiler_proc.wait(timeout=duration + 10)
             if profiler_returncode != 0:
-                pass  # Warning logged but continue
+                print(f"Warning: profiler exited with code {profiler_returncode}", file=sys.stderr)
         except subprocess.TimeoutExpired:
             profiler_proc.kill()
             profiler_proc.wait()
