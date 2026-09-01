@@ -109,6 +109,7 @@ python3 mcp_server_http.py              # Runs on http://localhost:8000
 
 ## 📚 Documentation
 
+- **[MCP_SETUP.md](MCP_SETUP.md)** — MCP server setup, Docker, and production deployment
 - **[AGENTS.md](AGENTS.md)** — Developer reference (both implementations)
 - **[skill/SIMPLIFIED_DESIGN.md](skill/SIMPLIFIED_DESIGN.md)** — Why we simplified the skill
 - **[skill/SKILL_DISTRIBUTION.md](skill/SKILL_DISTRIBUTION.md)** — How to use & share the skill
