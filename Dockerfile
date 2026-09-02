@@ -15,8 +15,7 @@ COPY skill/pprof_analyzer/requirements.txt ./pprof_analyzer_requirements.txt
 COPY pyproject.toml .
 RUN pip install --no-cache-dir \
     -r requirements.txt \
-    -r pprof_analyzer_requirements.txt \
-    fastapi uvicorn[standard]
+    -r pprof_analyzer_requirements.txt
 
 # Copy application code
 COPY prompts/ ./prompts/
