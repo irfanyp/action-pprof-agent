@@ -35,11 +35,43 @@ from fastapi import FastAPI
 from starlette.responses import JSONResponse
 from uvicorn import Config, Server
 
-from mcp_tools.main import server  # Import shared server with all tools defined
+from mcp_tools.main import (  # Import shared server with all tools defined
+    analyze_pprof_profile_tool,
+    run_cpu_profile_tool,
+    server,
+)
 
 API_KEY_NAME = "X-API-Key"
 API_KEY_HEADER = API_KEY_NAME.lower().encode("ascii")
 API_KEY_EXEMPT_PATHS = {"/health"}
+
+
+def configure_http_only_tools() -> None:
+    """Hide tools from the HTTP/SSE listing that don't make sense for a remote caller.
+
+    analyze_pprof_profile_tool takes filesystem paths and opens them on whatever
+    host runs this server — for a caller on a different machine those paths can
+    never resolve correctly, so it's always excluded here (use
+    build_pprof_analysis_prompt_tool instead). run_cpu_profile_tool builds and
+    executes arbitrary repo code on this host; it's excluded unless the operator
+    has explicitly opted in via MCP_ENABLE_CPU_PROFILE (the same env var
+    run_cpu_profile() itself checks — this is a defense-in-depth UX improvement,
+    not a replacement for that check).
+
+    Reaches into MCPServer's private _tool_manager since there's no public API
+    for removing/re-adding a registered tool. Safe to call repeatedly (e.g. once
+    per test with a different env var state) — each branch is a no-op if the
+    tool is already in the desired state.
+    """
+    if server._tool_manager.get_tool(analyze_pprof_profile_tool.__name__) is not None:
+        server._tool_manager.remove_tool(analyze_pprof_profile_tool.__name__)
+
+    cpu_profile_enabled = bool(os.environ.get("MCP_ENABLE_CPU_PROFILE"))
+    has_cpu_profile_tool = server._tool_manager.get_tool(run_cpu_profile_tool.__name__) is not None
+    if cpu_profile_enabled and not has_cpu_profile_tool:
+        server._tool_manager.add_tool(run_cpu_profile_tool)
+    elif not cpu_profile_enabled and has_cpu_profile_tool:
+        server._tool_manager.remove_tool(run_cpu_profile_tool.__name__)
 
 
 class ApiKeyMiddleware:
@@ -95,6 +127,7 @@ app.add_middleware(ApiKeyMiddleware)
 @app.get("/")
 async def root():
     """Root endpoint with server information."""
+    tools = await server.list_tools()
     return {
         "name": "pprof-analyzer",
         "version": "0.1.0",
@@ -106,13 +139,9 @@ async def root():
             "health": "GET /health (health check)",
             "docs": "GET /docs (API documentation)",
         },
-        "tools": [
-            "analyze_pprof_profile",
-            "build_pprof_analysis_prompt",
-            "integrate_pprof_endpoint",
-            "generate_load_test",
-            "run_cpu_profile",
-        ],
+        # Reflects configure_http_only_tools()'s current filtering — not a
+        # static list, since which tools are exposed depends on env vars.
+        "tools": sorted(t.name for t in tools),
     }
 
 
@@ -152,12 +181,21 @@ Examples:
     )
     args = parser.parse_args()
 
+    configure_http_only_tools()
+
     if not os.environ.get("MCP_API_KEY"):
-        logger.warning(
-            "MCP_API_KEY is not set — /sse is unauthenticated. Anyone who can reach "
-            "this port can invoke run_cpu_profile, which builds and runs arbitrary "
-            "repo code on this host. Set MCP_API_KEY before binding to a non-local host."
-        )
+        if os.environ.get("MCP_ENABLE_CPU_PROFILE"):
+            logger.warning(
+                "MCP_API_KEY is not set — /sse is unauthenticated. MCP_ENABLE_CPU_PROFILE is "
+                "set, so anyone who can reach this port can invoke run_cpu_profile, which "
+                "builds and runs arbitrary repo code on this host. Set MCP_API_KEY before "
+                "binding to a non-local host."
+            )
+        else:
+            logger.warning(
+                "MCP_API_KEY is not set — /sse is unauthenticated. Set MCP_API_KEY before "
+                "binding to a non-local host."
+            )
 
     # Mount the MCP SDK's native SSE transport as a sub-app. It defines its own
     # /sse and /messages/ routes; ApiKeyMiddleware on the outer app covers them too.

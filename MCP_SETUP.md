@@ -118,7 +118,11 @@ claude mcp add --transport sse pprof-analyzer http://<server-ip>:8000/sse \
 machines:** every tool takes `repo_path`/`profile_path` as strings and opens
 them directly — over HTTP those are just text sent from your machine, so the
 server tries to open *your* local paths on *its own* disk and fails (or, if a
-coincidentally-valid path exists on the server, reads the wrong thing).
+coincidentally-valid path exists on the server, reads the wrong thing). To
+avoid agents wasting a call on a tool that can never work remotely, the HTTP
+transport specifically (not stdio) hides `analyze_pprof_profile` from its tool
+listing entirely, and hides `run_cpu_profile` unless `MCP_ENABLE_CPU_PROFILE`
+is set — see `configure_http_only_tools()` in `mcp_server_http.py`.
 
 - `integrate_pprof_endpoint` and `generate_load_test` don't actually read any
   repo content — they only sanity-check that `repo_path` exists and has a

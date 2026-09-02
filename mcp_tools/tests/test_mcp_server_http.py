@@ -12,6 +12,7 @@ import mcp_server_http
 @pytest.fixture
 def mounted_app():
     """Build the same app main() builds: FastAPI app + mounted MCP SSE sub-app."""
+    mcp_server_http.configure_http_only_tools()
     app = mcp_server_http.app
     if not any(getattr(route, "path", None) == "/sse" for route in app.routes):
         app.mount("/", mcp_server_http.server.sse_app(host="127.0.0.1"))
@@ -112,3 +113,51 @@ def test_health_check_exempt_from_api_key(mounted_app, monkeypatch):
     with TestClient(mounted_app) as client:
         response = client.get("/health")
     assert response.status_code == 200
+
+
+class TestHttpOnlyToolFiltering:
+    """analyze_pprof_profile_tool and (by default) run_cpu_profile_tool must not
+    be reachable over HTTP — see configure_http_only_tools()."""
+
+    @pytest.mark.asyncio
+    async def test_analyze_pprof_profile_tool_always_hidden(self, monkeypatch):
+        monkeypatch.delenv("MCP_ENABLE_CPU_PROFILE", raising=False)
+        mcp_server_http.configure_http_only_tools()
+        names = {t.name for t in await mcp_server_http.server.list_tools()}
+        assert "analyze_pprof_profile_tool" not in names
+
+    @pytest.mark.asyncio
+    async def test_run_cpu_profile_tool_hidden_by_default(self, monkeypatch):
+        monkeypatch.delenv("MCP_ENABLE_CPU_PROFILE", raising=False)
+        mcp_server_http.configure_http_only_tools()
+        names = {t.name for t in await mcp_server_http.server.list_tools()}
+        assert "run_cpu_profile_tool" not in names
+
+    @pytest.mark.asyncio
+    async def test_run_cpu_profile_tool_visible_when_enabled(self, monkeypatch):
+        monkeypatch.setenv("MCP_ENABLE_CPU_PROFILE", "1")
+        mcp_server_http.configure_http_only_tools()
+        names = {t.name for t in await mcp_server_http.server.list_tools()}
+        assert "run_cpu_profile_tool" in names
+
+    @pytest.mark.asyncio
+    async def test_remote_safe_tools_remain_visible(self, monkeypatch):
+        monkeypatch.delenv("MCP_ENABLE_CPU_PROFILE", raising=False)
+        mcp_server_http.configure_http_only_tools()
+        names = {t.name for t in await mcp_server_http.server.list_tools()}
+        assert names == {
+            "build_pprof_analysis_prompt_tool",
+            "integrate_pprof_endpoint_tool",
+            "generate_load_test_tool",
+        }
+
+    @pytest.mark.asyncio
+    async def test_idempotent_across_repeated_calls(self, monkeypatch):
+        """Calling configure_http_only_tools() more than once (e.g. once per test
+        in this shared-process suite) must not raise or change the outcome."""
+        monkeypatch.setenv("MCP_ENABLE_CPU_PROFILE", "1")
+        mcp_server_http.configure_http_only_tools()
+        mcp_server_http.configure_http_only_tools()
+        names = {t.name for t in await mcp_server_http.server.list_tools()}
+        assert "run_cpu_profile_tool" in names
+        assert "analyze_pprof_profile_tool" not in names
