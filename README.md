@@ -111,9 +111,7 @@ python3 mcp_server_http.py              # Runs on http://localhost:8000
 
 - **[MCP_SETUP.md](MCP_SETUP.md)** — MCP server setup, Docker, and production deployment
 - **[AGENTS.md](AGENTS.md)** — Developer reference (both implementations)
-- **[skill/SIMPLIFIED_DESIGN.md](skill/SIMPLIFIED_DESIGN.md)** — Why we simplified the skill
-- **[skill/SKILL_DISTRIBUTION.md](skill/SKILL_DISTRIBUTION.md)** — How to use & share the skill
-- **[skill/IMPLEMENTATION_SUMMARY.md](skill/IMPLEMENTATION_SUMMARY.md)** — Technical details
+- **[skill/README.md](skill/README.md)** — Claude Code skill usage, design, and distribution
 - **[action/pprof_integration.md](action/pprof_integration.md)** — How to add pprof to your Go service
 
 ---

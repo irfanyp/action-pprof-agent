@@ -46,9 +46,6 @@ file_map = [
     # Distribution docs
     ('skill/README.md', 'README.md'),
     ('skill/INSTALL.md', 'INSTALL.md'),
-    ('skill/SIMPLIFIED_DESIGN.md', 'SIMPLIFIED_DESIGN.md'),
-    ('skill/SKILL_DISTRIBUTION.md', 'SKILL_DISTRIBUTION.md'),
-    ('skill/IMPLEMENTATION_SUMMARY.md', 'IMPLEMENTATION_SUMMARY.md'),
 ]
 
 # Skill directories to include (each becomes <prefix>/<skill-name>/ containing

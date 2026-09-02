@@ -1,46 +1,26 @@
 # MCP Server Setup Guide
 
-Two transport options for the pprof-analyzer MCP server:
-
----
-
-## Quick Start
-
-### Option A: Stdio (Local Development)
-Single user, simplest setup.
+Two transport options: **stdio** for local/single-user use, **HTTP/SSE** for team access over a network.
 
 ```bash
-python3 mcp_server.py
+python3 mcp_server.py                              # stdio, local only
+python3 mcp_server_http.py                          # HTTP/SSE on localhost:8000
+python3 mcp_server_http.py --host 0.0.0.0 --port 9000   # network-accessible, custom port
 ```
 
-### Option B: HTTP/SSE (Team Collaboration) ⭐ Recommended
-Multiple concurrent users, network accessible.
-
-```bash
-python3 mcp_server_http.py                        # localhost:8000
-python3 mcp_server_http.py --host 0.0.0.0         # all interfaces
-python3 mcp_server_http.py --port 9000             # custom port
-```
-
-**Endpoints:**
-- MCP: `http://localhost:8000/sse`
-- Health: `http://localhost:8000/health`
-- Docs: `http://localhost:8000/docs`
+HTTP/SSE endpoints: MCP at `/sse`, health at `/health`, docs at `/docs`.
 
 ---
 
 ## Agent Registration
 
-### Claude Code
+**Claude Code:**
 ```bash
 claude mcp add --transport stdio pprof-analyzer --scope project -- \
   python3 $(pwd)/mcp_server.py
 ```
 
-### Claude Desktop
-Edit `~/.claude_desktop/claude_desktop_config.json`:
-
-**Stdio:**
+**Claude Desktop / Cursor** (`claude_desktop_config.json`) **and Cline** (`.cline_mcp_settings.json`):
 ```json
 {
   "mcpServers": {
@@ -51,46 +31,7 @@ Edit `~/.claude_desktop/claude_desktop_config.json`:
   }
 }
 ```
-
-**HTTP/SSE:**
-```json
-{
-  "mcpServers": {
-    "pprof-analyzer": {
-      "url": "http://localhost:8000/sse"
-    }
-  }
-}
-```
-
-### Cline (VSCode)
-Create `.cline_mcp_settings.json` in project root:
-
-**Stdio:**
-```json
-{
-  "mcpServers": {
-    "pprof-analyzer": {
-      "command": "python3",
-      "args": ["/absolute/path/to/mcp_server.py"]
-    }
-  }
-}
-```
-
-**HTTP/SSE:**
-```json
-{
-  "mcpServers": {
-    "pprof-analyzer": {
-      "url": "http://localhost:8000/sse"
-    }
-  }
-}
-```
-
-### Cursor
-Edit `~/.cursor/settings/claude_desktop_config.json` (same as Claude Desktop above).
+For HTTP/SSE, replace `command`/`args` with `"url": "http://localhost:8000/sse"`.
 
 ---
 
@@ -148,61 +89,35 @@ is set — see `configure_http_only_tools()` in `mcp_server_http.py`.
 ## Verification
 
 ```bash
-# Health check
-curl http://localhost:8000/health
-
-# Root endpoint (shows available tools)
-curl http://localhost:8000/
-
-# API docs
-curl http://localhost:8000/docs
+curl http://localhost:8000/health   # health check
+curl http://localhost:8000/         # available tools
+curl http://localhost:8000/docs     # API docs
 ```
 
 ---
 
 ## Docker Deployment
 
-### Build
 ```bash
 docker build -t pprof-analyzer-mcp .
+docker run -p 8000:8000 pprof-analyzer-mcp                        # local dev
+docker run -d --network host --name mcp-server pprof-analyzer-mcp --port 8000   # hosted VM, no NAT overhead
 ```
 
-### Run — Local Development
+**Custom port:** the image's `HEALTHCHECK` probes `$MCP_HTTP_PORT` (default `8000`).
+If you override `--port`, set `-e MCP_HTTP_PORT=<port>` too, or the container
+reports `unhealthy` even while the server works fine:
 ```bash
-docker run -p 8000:8000 pprof-analyzer-mcp
+docker run -d --network host --name mcp-server \
+  -e MCP_HTTP_PORT=8991 pprof-analyzer-mcp --port 8991
 ```
 
-### Run — Hosted VM (Host Networking) ⭐
-```bash
-docker run -d \
-  --network host \
-  --name mcp-server \
-  pprof-analyzer-mcp --port 8000
-```
-
-This binds directly to VM port `8000` with no NAT overhead.
-
-**Using a custom port:** the image's `HEALTHCHECK` reads the `MCP_HTTP_PORT`
-env var (default `8000`) to know which port to probe. If you override the
-port via `--port`, set `-e MCP_HTTP_PORT=<port>` too, or the healthcheck will
-probe the wrong port and the container will show as `unhealthy` even though
-the server is working fine:
-```bash
-docker run -d \
-  --network host \
-  --name mcp-server \
-  -e MCP_HTTP_PORT=8991 \
-  pprof-analyzer-mcp --port 8991
-```
-
-### Docker Compose
+**Compose:**
 ```yaml
-version: '3.8'
 services:
   mcp-server:
     build: .
-    ports:
-      - "8000:8000"
+    ports: ["8000:8000"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -211,105 +126,35 @@ services:
       retries: 3
 ```
 
-Run: `docker-compose up -d`
+**Systemd** (`ExecStart=/usr/bin/python3 /path/to/mcp_server_http.py --host 0.0.0.0 --port 8000`,
+`Restart=always`) works the same as any long-running Python service.
 
-### Push to Registry
-```bash
-# Docker Hub
-docker tag pprof-analyzer-mcp <username>/pprof-analyzer-mcp:0.1.0
-docker push <username>/pprof-analyzer-mcp:0.1.0
-
-# Azure ACR
-docker tag pprof-analyzer-mcp myregistry.azurecr.io/pprof-analyzer-mcp:0.1.0
-docker push myregistry.azurecr.io/pprof-analyzer-mcp:0.1.0
-
-# AWS ECR
-docker tag pprof-analyzer-mcp 123456789.dkr.ecr.us-east-1.amazonaws.com/pprof-analyzer-mcp:0.1.0
-docker push 123456789.dkr.ecr.us-east-1.amazonaws.com/pprof-analyzer-mcp:0.1.0
-```
-
-### Systemd Service
-Create `/etc/systemd/system/pprof-analyzer-mcp.service`:
-```ini
-[Unit]
-Description=pprof-analyzer MCP Server
-After=network.target
-
-[Service]
-Type=simple
-User=mcp
-WorkingDirectory=/home/mcp/pprof-analyzer
-ExecStart=/usr/bin/python3 /home/mcp/pprof-analyzer/mcp_server_http.py --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-```bash
-sudo systemctl enable pprof-analyzer-mcp
-sudo systemctl start pprof-analyzer-mcp
-```
+**Registry push:** tag and `docker push` as usual (Docker Hub, ACR, ECR, etc.) —
+no project-specific steps beyond the standard `docker tag <image> <registry>/<name>:<tag>`.
 
 ---
 
 ## Troubleshooting
 
-**Port already in use:**
-```bash
-lsof -i :8000        # Find what's using it
-# Or use different port:
-python3 mcp_server_http.py --port 9000
-```
-
-**Connection refused (from another machine):**
-```bash
-# Use 0.0.0.0 to listen on all interfaces
-python3 mcp_server_http.py --host 0.0.0.0 --port 8000
-```
-
-**Container shows `unhealthy` despite the server working:**
-```bash
-# The HEALTHCHECK probes $MCP_HTTP_PORT (default 8000). If you passed a
-# custom --port without also setting MCP_HTTP_PORT, it's probing the wrong
-# port. Recreate the container with matching values, e.g.:
-docker run -d --network host --name mcp-server \
-  -e MCP_HTTP_PORT=8991 pprof-analyzer-mcp --port 8991
-```
-
-**Import errors:**
-```bash
-pip install -e .
-```
-
-**Docker: Container exits immediately:**
-```bash
-docker logs <container-id>
-docker run -it pprof-analyzer-mcp /bin/bash  # Debug shell
-```
+| Symptom | Fix |
+|---|---|
+| Port already in use | `lsof -i :8000`, or run with `--port 9000` |
+| Connection refused from another machine | Bind with `--host 0.0.0.0` |
+| Container `unhealthy` despite working server | Custom `--port` needs matching `-e MCP_HTTP_PORT=<port>` |
+| Import errors | `pip install -e .` |
+| Container exits immediately | `docker logs <container-id>`, or `docker run -it pprof-analyzer-mcp /bin/bash` to debug |
 
 ---
 
 ## Reference
 
 | Feature | Stdio | HTTP/SSE |
-|---------|-------|----------|
+|---|---|---|
 | Setup | Simple | Moderate |
 | Users | Single | Multiple concurrent |
 | Network | Local only | Local + remote |
 | Best for | Development | Teams, production |
 
-**Docker reference:**
-- Default port: `8000`
-- `MCP_HTTP_PORT` env var: must match `--port` or the `HEALTHCHECK` probes the wrong port
-- Health: `GET /health`
-- MCP SSE: `GET /sse`
-- Docs: `GET /docs`
-- Base image: `python:3.10-slim`
-- Non-root user: `mcp` (UID 1000)
-
----
+Docker defaults: port `8000` (override with `MCP_HTTP_PORT`), base image `python:3.10-slim`, non-root user `mcp` (UID 1000).
 
 For architectural details, see [AGENTS.md](AGENTS.md).
