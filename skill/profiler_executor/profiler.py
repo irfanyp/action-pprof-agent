@@ -16,6 +16,17 @@ import urllib.request
 from pathlib import Path
 
 
+def _terminate_proc(proc: subprocess.Popen, timeout: int = 5) -> None:
+    """Terminate a subprocess gracefully: SIGTERM, then SIGKILL if it doesn't exit in time."""
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
 def _wait_for_service(port: int, timeout: int = 10) -> bool:
     """Poll the service's HTTP port until it responds or the timeout elapses."""
     deadline = time.time() + timeout
@@ -93,13 +104,7 @@ def run_profiler(
     # Wait for service to become ready (bounded poll instead of a fixed sleep,
     # since startup time varies with DB connections, migrations, etc.)
     if not _wait_for_service(port, timeout=10):
-        if service_proc.poll() is None:
-            service_proc.terminate()
-            try:
-                service_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                service_proc.kill()
-                service_proc.wait()
+        _terminate_proc(service_proc)
         stdout, stderr = service_proc.communicate()
         raise RuntimeError(f"Service did not become ready on port {port} within timeout\n{stderr}")
 
@@ -183,11 +188,7 @@ Next steps:
 
     finally:
         # Clean up: stop the service
-        service_proc.terminate()
-        try:
-            service_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            service_proc.kill()
+        _terminate_proc(service_proc)
 
         # Clean up binary
         (repo_path / "service_bin").unlink(missing_ok=True)

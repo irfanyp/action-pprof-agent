@@ -55,8 +55,8 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         expected = os.environ.get("MCP_API_KEY")
         if expected and request.url.path not in API_KEY_EXEMPT_PATHS:
-            provided = request.headers.get(API_KEY_NAME) or ""
-            if not hmac.compare_digest(provided, expected):
+            provided = (request.headers.get(API_KEY_NAME) or "").encode("utf-8", "ignore")
+            if not hmac.compare_digest(provided, expected.encode("utf-8", "ignore")):
                 return JSONResponse({"detail": "Invalid or missing API key"}, status_code=403)
         return await call_next(request)
 
