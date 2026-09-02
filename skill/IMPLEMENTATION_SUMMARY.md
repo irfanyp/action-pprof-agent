@@ -40,12 +40,12 @@ Extracts into a single flat `pprof-analyzer-skill/` directory containing everyth
 
 ## Key Technical Achievements
 
-### ✅ Single-Turn Analysis (No Agent Loop)
+### ✅ No Custom Agent-Loop Code
 
 **Traditional approach (Action):**
 ```
-1. Send profile to LLM
-2. LLM: "I need file X" → Action sends it
+1. Send profile to LLM (external API)
+2. LLM: "I need file X" → Action's Python code intercepts and sends it
 3. LLM: "I need lines Y-Z" → Action sends them
 4. Repeat 10+ times
 5. LLM: "Here's the patch"
@@ -53,25 +53,24 @@ Extracts into a single flat `pprof-analyzer-skill/` directory containing everyth
 
 **New approach (Skill):**
 ```
-1. Extract hotspot files locally (~75KB)
-2. Send everything to Claude at once
-3. Claude: "Here's the analysis & patch"
-4. Done
+1. Gather profile markdown + Go file list locally (no source read yet)
+2. Hand both to Claude in one prompt
+3. Claude reads whichever files it needs via its own native Read tool
+4. Claude: "Here's the analysis & patch"
+5. Done
 ```
 
-**Result:** ⚡ 10x faster, simpler, more predictable
+**Result:** No external LLM API, no custom tool-call interception code to maintain — Claude Code's own agentic Read tool does the file-fetching step 2 used to require custom Python for.
 
-### ✅ Smart File Selection
+### ✅ File-List Based Context
 
-Automatically extracts files mentioned in pprof hotspots + their imports. No manual file specification needed.
+The skill lists the repo's Go files (`git ls-files`) and hands that list — not file content — to Claude, which decides what to read.
 
 ```python
-# Algorithm:
-1. Parse pprof output for file paths
-2. Extract 3-10 files from hotspots
-3. Add direct imports (1 level)
-4. Cap at 20 files or 75KB
-5. Pass all to Claude
+# gather_local_context(profile_path, repo_path):
+1. Convert pprof to markdown via pprof-to-md
+2. List Go files via git ls-files
+3. Return (markdown, file_list) — no file content read here
 ```
 
 ### ✅ Full Transparency
@@ -115,10 +114,12 @@ User Input
 ├─────────────────────────────────────┤
 │ 1. Validate config                  │
 │ 2. Convert pprof → markdown         │
-│ 3. Extract hotspot files            │
-│ 4. Read source code                 │
-│ 5. Build prompt                     │
-│ 6. Call Claude (single turn)        │
+│ 3. List Go files (git ls-files)     │
+│ 4. Build prompt (markdown+filelist) │
+│ 5. Return to Claude Code            │
+│ 6. Claude reads files via Read tool,│
+│    analyzes (single Claude Code     │
+│    turn, no external API loop)     │
 │ 7. Extract SUMMARY and PATCH        │
 │ 8. Validate patch with git apply    │
 │ 9. Write artifacts to .ai_output/   │
@@ -137,12 +138,16 @@ Output Artifacts
 ├─────────────────────────────────────┤
 │ INPUT DATA                          │
 │ - Pprof analysis (markdown)         │
-│ - Source code (all hotspot files)   │
+│ - Go file list (paths only)         │
 ├─────────────────────────────────────┤
 │ TASK DEFINITION                     │
 │ - Analyze hotspots                  │
 │ - Propose fixes respecting level    │
 │ - Output SUMMARY + PATCH            │
+├─────────────────────────────────────┤
+│ read_file TOOL INSTRUCTIONS         │
+│ - How to request a file/line range  │
+│ - How to strip the L{n}| prefix     │
 ├─────────────────────────────────────┤
 │ OUTPUT FORMAT                       │
 │ - Markdown table (analysis)         │
@@ -151,9 +156,9 @@ Output Artifacts
 ```
 
 **Key difference from action:**
-- ✅ No `read_file` tool instructions
-- ✅ All code included upfront
-- ✅ Single-turn, no loops
+- ✅ Same `read_file` tool instructions (shared template) — but fulfilled by Claude Code's own native `Read` tool, not custom Python interception
+- ✅ No external LLM API call — Claude Code's own model does the analysis
+- ✅ No custom Python agent-loop code to maintain
 - ✅ Simplified output format expectations
 
 ## Performance Characteristics
@@ -187,25 +192,25 @@ vs. Action: More expensive (service calls + multi-turn)
 
 ```
 Profile markdown:     ~5-10 KB
-Source code:          ~50-75 KB
+Go file list:          ~1-5 KB (paths only, no content)
 Prompt template:      ~10 KB
 Overhead:             ~5 KB
-Total:                ~70-100 KB tokens
+Total:                ~20-30 KB tokens, plus whatever Claude reads on demand
 ```
 
-Claude can handle 200K+ tokens, so we're well within limits.
+Claude can handle 200K+ tokens, so we're well within limits even after it reads several files via its own `Read` tool.
 
 ## Code Quality
 
 ### Test Coverage
 
 - Unit tests for SUMMARY/PATCH extraction
-- Unit tests for file selection algorithm
-- Unit tests for hotspot extraction
+- Unit tests for `gather_local_context()` / `build_analysis_prompt()`
+- Regression test that builds a prompt against the real `prompts/prompt_template.txt` (catches template/kwarg drift)
 - Integration test framework (can add live tests)
 
 ```bash
-pytest pprof-analyzer/tests/
+pytest skill/pprof_analyzer/tests/
 ```
 
 ### Code Style
@@ -273,7 +278,7 @@ Environment variables or CLI flags:
 |--------|--------|-------|
 | **Invocation** | GitHub workflow trigger | Claude Code `/pprof-analyze` command |
 | **Profile source** | Service polling (remote) | Local file |
-| **File context** | Tool-use loop (10+ calls) | All upfront (smart-selected) |
+| **File context** | Custom Python tool-use loop against external LLM (10+ calls) | File list only; Claude reads files it needs via its own native `Read` tool |
 | **LLM turns** | Multi-turn agent | Single turn |
 | **Output** | PR + artifacts | Artifacts only (user creates PR) |
 | **Speed** | 2-5 min | 15-35 sec |
@@ -306,7 +311,7 @@ git commit -m "perf: optimize hotspots"
 ### Easy to Modify
 
 - **Prompt**: Edit `prompts/prompt_template.txt` to change Claude's behavior
-- **File selection**: Modify `select_files_smart()` in analyzer.py
+- **File listing**: Modify `find_all_go_files()` in analyzer.py
 - **Output format**: Adjust artifact generation in `write_artifacts()`
 - **Validation**: Add custom `git apply` options
 
@@ -332,13 +337,10 @@ python3 ~/.claude/skills/pprof-analyzer/analyzer.py \
 
 ### Current Limitations
 
-1. **Single-turn only**: No iterative refinement if Claude gets it wrong
+1. **No iterative refinement**: If Claude gets the patch wrong, there's no automatic retry
    - **Workaround**: Try with different reference level or model
 
-2. **File size cap**: ~75KB of code to stay in context limits
-   - **Workaround**: Use high reference level to get most important files
-
-3. **No PR creation**: Skill outputs patch; user creates PR
+2. **No PR creation**: Skill outputs patch; user creates PR
    - **By design**: Non-destructive approach
    - **Improvement**: Could add `--auto-commit` flag in future
 

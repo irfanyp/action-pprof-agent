@@ -106,16 +106,16 @@ This repository includes **four complementary Claude Code skills** that work tog
 The **pprof-analyzer** skill (the core analysis tool):
 
 1. **Converts** your pprof profile (CPU, memory, goroutine) to detailed markdown
-2. **Extracts** the Go source files mentioned in the hotspots
-3. **Passes all context** to Claude upfront (no back-and-forth tool calls)
+2. **Lists** the Go source files in the repository (via `git ls-files`)
+3. **Passes** the profile markdown + file list to Claude, which reads specific files on demand with its own `Read` tool
 4. **Generates** a unified diff patch with performance analysis
 5. **Validates** the patch before writing it to disk
 6. **Saves artifacts** to `.ai_output/` for review and debugging
 
 ## Key Features
 
-- ✅ **Single-turn analysis** — No agent loops, just one Claude call with all context
-- ✅ **Smart file selection** — Automatically finds relevant source files from hotspots
+- ✅ **No external LLM calls** — Claude Code's own model does the analysis; no agent-loop Python code to call an API
+- ✅ **File-list based** — The analyzer never inlines source; Claude reads exactly the files it needs via its native `Read` tool
 - ✅ **Full transparency** — All prompts and responses saved to `.ai_output/`
 - ✅ **Patch validation** — Ensures generated patches apply cleanly before writing
 - ✅ **Reference levels** — Control analysis depth (low/med/high)
@@ -125,27 +125,21 @@ The **pprof-analyzer** skill (the core analysis tool):
 
 ### Unlike the GitHub Action
 
-The full GitHub Action uses a **multi-turn agent loop**:
-- Sends profile to LLM
-- LLM uses `read_file` tool to request specific source files
-- Action provides them
-- LLM refines analysis
-- Repeat up to 10 times
+The full GitHub Action drives a **custom multi-turn loop against an external LLM API**:
+- Calls an OpenAI-compatible endpoint with the profile + a bare file list
+- LLM uses a `read_file` tool call; Action's Python code intercepts it and returns the file
+- Repeat up to 10 times, then the LLM returns SUMMARY + PATCH
 
-This skill uses a **single-turn approach**:
-- Collects all relevant source files upfront (~50-75KB of code)
-- Sends everything to Claude in one prompt
-- Gets back SUMMARY + PATCH
-- Validates and saves
+This skill relies on **Claude Code's own agentic capabilities** instead of custom orchestration:
+- Gathers the profile markdown + file list locally (no source content read at this stage)
+- Hands both to Claude in one prompt
+- Claude — already running inside Claude Code, with its own `Read` tool — pulls whichever files it needs directly from the local repo, no custom tool-call interception required
+- Gets back SUMMARY + PATCH, validates, and saves
 
 **Benefits:**
-- Simpler — No tool-use loop complexity
-- Faster — Single API call instead of 10+
-- Deterministic — No retries or edge cases
-
-**Trade-off:**
-- We include more source code upfront (but smart-selected)
-- Works well for most Go services (hotspots are usually in a few key files)
+- Simpler — No custom tool-use loop or external API client to maintain
+- No credentials — Uses Claude Code's built-in model, not an external LLM endpoint
+- Deterministic file access — Claude reads exactly what it asks for, nothing pre-selected or truncated by a size cap
 
 ## Installation
 
@@ -392,17 +386,15 @@ npm install -g pprof-to-md
 
 See [INSTALL.md](INSTALL.md) for more troubleshooting.
 
-## How Hotspots Are Extracted
+## How Hotspots Are Analyzed
 
 The skill automatically:
 
 1. **Converts** the pprof binary with `pprof-to-md --format detailed`
-2. **Parses** the output to find file paths (e.g., `main.go`, `utils/cache.go`)
-3. **Includes** those files + their direct imports
-4. **Caps** total code at ~75KB to stay within Claude's context window
-5. **Passes** everything to Claude upfront
+2. **Lists** the repository's Go files with `git ls-files`
+3. **Passes** the profile markdown + file list to Claude
 
-This "smart selection" means you get all the context Claude needs without manual setup.
+Claude then reads whichever files it actually needs with its own `Read` tool — no manual file specification, and no fixed size cap on what it can inspect.
 
 ## Creating a Profile
 

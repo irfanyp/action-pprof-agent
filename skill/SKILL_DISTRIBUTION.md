@@ -96,40 +96,35 @@ Action Flow (multi-turn):
 └─────────────────────────────────────────┘
 ```
 
-This skill uses a simpler approach:
+This skill relies on Claude Code's own agentic capabilities instead:
 
 ```
-Skill Flow (single-turn):
+Skill Flow:
 ┌──────────────────────────────────────────┐
-│ 1. Extract files from hotspots (~75KB)   │
-│ 2. Send EVERYTHING to Claude upfront     │
-│ 3. Claude: "Here's my analysis & patch"  │
-│ 4. Done!                                  │
+│ 1. List Go files (git ls-files)          │
+│ 2. Send profile + file list to Claude    │
+│ 3. Claude reads files it needs via its   │
+│    own Read tool, no custom interception │
+│ 4. Claude: "Here's my analysis & patch"  │
+│ 5. Done!                                  │
 └──────────────────────────────────────────┘
 ```
 
 **Benefits:**
-- ✅ Simpler (no tool-use complexity)
-- ✅ Faster (single API call)
-- ✅ Deterministic (no retry logic needed)
-
-**Trade-off:**
-- We include ~50-75KB of source code upfront
-- Works well for most Go services
-
-For most Go services, the hotspots are in a few key files. We include those files + their direct imports, capping at ~75KB of code. This is typically enough context for Claude to make good optimization suggestions.
+- ✅ No external LLM API or custom tool-call interception code to maintain
+- ✅ Deterministic file access — Claude reads exactly what it asks for
+- ✅ No fixed size cap on what Claude can inspect
 
 ## Key Features
 
-### Smart File Selection
+### File-List-Based Context
 
 The skill automatically:
 1. Converts pprof to markdown with `pprof-to-md`
-2. Extracts file paths mentioned in hotspots
-3. Includes files + their direct imports
-4. Caps at ~75KB to stay within Claude's comfortable window
+2. Lists the repository's Go files with `git ls-files`
+3. Passes the file list (not file content) to Claude
 
-No manual file selection needed.
+Claude reads whichever files it actually needs with its own `Read` tool — no manual file specification needed.
 
 ### Three Analysis Depths
 
@@ -325,11 +320,11 @@ The skill is designed to be minimal. For major changes:
 
 ## FAQ
 
-**Q: Why single-turn instead of agent loop?**  
-A: Simpler, faster, and works well for typical Go services where hotspots are in a few key files.
+**Q: Why not use a custom agent loop like the Action does?**  
+A: Claude Code already gives Claude a native `Read` tool — there's no need to reimplement a `read_file` request/response loop in Python when the calling agent can just read files itself.
 
 **Q: Can I add more files to the analysis?**  
-A: Not yet, but you can modify `analyzer.py` to change `select_files_smart()`.
+A: Claude isn't limited to a fixed file set — it reads whatever it decides it needs via its own `Read` tool. There's no cap or pre-selection to modify.
 
 **Q: What if Claude generates an invalid patch?**  
 A: The skill validates with `git apply --check` and saves artifacts for debugging.
