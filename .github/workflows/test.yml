@@ -25,7 +25,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --no-cache-dir -r action/scripts/requirements-dev.txt
+          pip install --no-cache-dir -r mcp_tools/requirements.txt pytest pytest-mock pytest-asyncio
 
       - name: Run tests
         run: |
-          python -m pytest action/scripts/tests/ -v --tb=short
+          python -m pytest action/scripts/tests/ mcp_tools/tests/ -v --tb=short

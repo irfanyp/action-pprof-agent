@@ -1,475 +1,193 @@
 # pprof-analyzer Claude Skill
 
-Analyze Go pprof profiles and generate performance optimization patches in Claude Code.
+Analyze Go pprof profiles and generate performance optimization patches in Claude Code — no API keys, no external LLM calls, no agent-loop code to maintain. This is the standalone Claude Code skill form of the [pprof-analyzer GitHub Action](https://github.com/irfanyusupramono/pprof-analyzer); it runs entirely locally.
 
-This is a **standalone Claude skill** version of the [pprof-analyzer GitHub Action](https://github.com/irfanyusupramono/pprof-analyzer), designed to work locally without requiring GitHub Actions or a remote analyzer service.
-
-## Quick Start
-
-### Complete End-to-End Workflow (Recommended)
-
-Starting with a raw Go service? Use the **complete workflow** with all four skills:
-
-```bash
-# 1. Integrate pprof endpoint into your service
-/pprof-integrator ./my-service
-   # (Review code changes, commit them)
-
-# 2. Generate a load test script
-/load-test-generator ./my-service --tool k6
-   # (Review load_test.js)
-
-# 3. Execute profiling with load test (captures cpu.prof)
-/profiler-executor ./my-service --load-cmd "k6 run load_test.js"
-   # (cpu.prof saved to .ai_output/)
-
-# 4. Analyze the profile and generate fixes
-/pprof-analyzer ./my-service --profile .ai_output/cpu.prof --reference med
-   # (patch + summary in .ai_output/)
-
-# 5. Review and apply the patch
-git apply .ai_output/patch.diff
-git commit -m "perf: optimize based on profile analysis"
-```
-
-### Quick Start (Already Have a Profile?)
-
-If you already have a pprof profile (`.pb.gz`, `.prof`, or `.pprof`):
-
-```bash
-# 1. Analyze it with Claude (no API keys needed!)
-/pprof-analyzer cpu.prof ./ med
-
-# 2. Review the results
-cat .ai_output/summary.md
-cat .ai_output/patch.diff
-
-# 3. Apply the patch
-git apply .ai_output/patch.diff
-```
-
-### Install (Automatic)
-
-```bash
-unzip pprof-analyzer-skill.zip
-cd pprof-analyzer-skill/
-./SETUP.sh install
-```
-
-This automatically installs:
-- ✅ Skill files to `~/.claude/skills/`
-- ✅ Python modules (GitPython)
-- ✅ Node modules (pprof-to-md)
+> **Source repo vs. distributed ZIP:** in this repository, skill directories use underscores (`skill/pprof_analyzer/`, `skill/load_test_generator/`, …) so they can be imported as Python modules by the MCP server. The distributed ZIP renames them to hyphens (`pprof-analyzer/`, …) and installs them to `~/.claude/skills/`, for backward compatibility with the original distribution format.
 
 ## The Four Skills
 
-This repository includes **four complementary Claude Code skills** that work together:
-
 | Skill | Purpose | Output |
-|-------|---------|--------|
-| **pprof-integrator** | Integrate pprof endpoint into Go service | Code changes (pprofserver.go) |
-| **load-test-generator** | Analyze service and generate load test | Load test script (k6, Apache Bench, etc.) |
+|---|---|---|
+| **pprof-integrator** | Integrate a pprof endpoint into a Go service | Code changes (pprofserver.go) |
+| **load-test-generator** | Analyze a service and generate a load test | Load test script (k6, Apache Bench, …) |
 | **profiler-executor** | Run profiling with load test in parallel | `cpu.prof` profile file |
-| **pprof-analyzer** | Analyze profile and generate fixes | Performance optimization patch |
+| **pprof-analyzer** | Analyze a profile and generate fixes | Performance optimization patch |
 
-**Use Case:** Starting with a bare Go service? Use all four in order. Already have a profile? Skip to pprof-analyzer.
+Starting from a bare Go service? Run all four in order. Already have a profile? Skip straight to pprof-analyzer.
 
-## What pprof-analyzer Does
+## Quick Start
 
-The **pprof-analyzer** skill (the core analysis tool):
+Already have a profile (`.pb.gz`, `.prof`, `.pprof`)?
 
-1. **Converts** your pprof profile (CPU, memory, goroutine) to detailed markdown
-2. **Extracts** the Go source files mentioned in the hotspots
-3. **Passes all context** to Claude upfront (no back-and-forth tool calls)
-4. **Generates** a unified diff patch with performance analysis
-5. **Validates** the patch before writing it to disk
-6. **Saves artifacts** to `.ai_output/` for review and debugging
+```bash
+/pprof-analyzer cpu.prof ./ med
+cat .ai_output/summary.md      # review analysis
+cat .ai_output/patch.diff      # review patch
+git apply .ai_output/patch.diff
+```
 
-## Key Features
+Starting from a raw service with no pprof endpoint yet?
 
-- ✅ **Single-turn analysis** — No agent loops, just one Claude call with all context
-- ✅ **Smart file selection** — Automatically finds relevant source files from hotspots
-- ✅ **Full transparency** — All prompts and responses saved to `.ai_output/`
-- ✅ **Patch validation** — Ensures generated patches apply cleanly before writing
-- ✅ **Reference levels** — Control analysis depth (low/med/high)
-- ✅ **Portable** — Easy to share and install across teams
-
-## How It Works
-
-### Unlike the GitHub Action
-
-The full GitHub Action uses a **multi-turn agent loop**:
-- Sends profile to LLM
-- LLM uses `read_file` tool to request specific source files
-- Action provides them
-- LLM refines analysis
-- Repeat up to 10 times
-
-This skill uses a **single-turn approach**:
-- Collects all relevant source files upfront (~50-75KB of code)
-- Sends everything to Claude in one prompt
-- Gets back SUMMARY + PATCH
-- Validates and saves
-
-**Benefits:**
-- Simpler — No tool-use loop complexity
-- Faster — Single API call instead of 10+
-- Deterministic — No retries or edge cases
-
-**Trade-off:**
-- We include more source code upfront (but smart-selected)
-- Works well for most Go services (hotspots are usually in a few key files)
+```bash
+/pprof-integrator ./my-service                                        # integrate pprof endpoint, then commit
+/load-test-generator ./my-service --tool k6                           # generate load_test.js
+/profiler-executor ./my-service --load-cmd "k6 run load_test.js"      # capture .ai_output/cpu.prof
+/pprof-analyzer ./my-service --profile .ai_output/cpu.prof --reference med
+git apply .ai_output/patch.diff && git commit -m "perf: optimize based on profile analysis"
+```
 
 ## Installation
 
-### Quick Install
-
+**From the distributed ZIP:**
 ```bash
 unzip pprof-analyzer-skill.zip
 cd pprof-analyzer-skill/
-./SETUP.sh install
+./SETUP.sh install     # installs skill files to ~/.claude/skills/, plus GitPython + pprof-to-md
+./SETUP.sh verify
 ```
 
-### Manual Install
+**From this source repository:**
+```bash
+skill/build-zip.sh
+unzip skill/pprof-analyzer-skill.zip
+cd pprof-analyzer-skill/ && ./SETUP.sh install
+```
 
-See [INSTALL.md](INSTALL.md) for detailed step-by-step instructions.
+The ZIP extracts into a single flat `pprof-analyzer-skill/` directory:
+```
+pprof-analyzer-skill/
+├── SETUP.sh                  # install / verify / uninstall
+├── README.md, INSTALL.md     # docs
+├── pprof-analyzer/           # analyzer.py, prompts/, requirements.txt, SKILL.md, tests/
+├── pprof-integrator/
+├── load-test-generator/
+└── profiler-executor/
+```
+See [INSTALL.md](INSTALL.md) for manual installation and detailed prerequisites.
+
+## How It Works
+
+The GitHub Action drives a **custom multi-turn agent loop against an external LLM API**: it sends the profile plus a bare file list, the LLM calls a `read_file` tool, the Action's Python code intercepts that call and returns the file, and this repeats (up to ~10 times) until the LLM returns a patch.
+
+This skill relies on **Claude Code's own agentic capabilities** instead:
+1. Convert the pprof profile to markdown (`pprof-to-md`) and list the repo's Go files (`git ls-files`) — no source content is read at this stage.
+2. Hand both to Claude in a single prompt.
+3. Claude — already running inside Claude Code, with its own native `Read` tool — pulls whichever files it needs directly from the local repo. No custom tool-call interception, no external API client.
+4. Claude returns `### SUMMARY` + `### PATCH`; the skill validates the patch with `git apply --check` and writes artifacts.
+
+|  | GitHub Action | Skill |
+|---|---|---|
+| LLM calls | External API, multi-turn | Claude Code's built-in model, single turn |
+| File access | Custom `read_file` tool-call loop | Claude's native `Read` tool, on demand |
+| API keys | Required | None |
+| Speed | 2-5 min | 15-35 sec |
+| Output | Opens a PR | Artifacts in `.ai_output/` (user applies/commits) |
+
+This means no external API calls, no credentials to manage, and no fixed cap on what Claude can inspect — it reads exactly what it asks for.
 
 ## Usage
 
-### Basic Command
-
 ```bash
-/pprof-analyze <profile_path> <repo_path> <reference_level>
+/pprof-analyzer <profile_path> <repo_path> <reference_level>
 ```
 
-### Arguments
-
-- `profile_path`: Path to pprof file (`.pb.gz`, `.prof`, `.pprof`)
-- `repo_path`: Path to Go repository root
-- `reference_level`: `low`, `med`, or `high`
-
-### Examples
+- `profile_path` — path to a pprof file (`.pb.gz`, `.prof`, `.pprof`)
+- `repo_path` — path to the Go repository root
+- `reference_level` — `low`, `med`, or `high` (analysis depth; see below)
 
 ```bash
-# Analyze a CPU profile with medium depth
-/pprof-analyze cpu.prof ./ med
-
-# Analyze memory profile in a different repo
-/pprof-analyze /var/tmp/mem.prof ~/myproject high
-
-# Conservative analysis (single hotspot)
-/pprof-analyze profile.pb.gz ./ low
+/pprof-analyzer cpu.prof ./ med                    # medium-depth CPU profile analysis
+/pprof-analyzer /var/tmp/mem.prof ~/myproject high # comprehensive memory profile analysis
+/pprof-analyzer profile.pb.gz ./ low               # conservative, single-hotspot fix
 ```
-
-### Output
 
 All artifacts go to `.ai_output/`:
-
 ```
 .ai_output/
-├── summary.md           # Analysis table and explanation (use for PR description)
-├── patch.diff           # Unified diff patch (apply with: git apply)
-├── analyzer_result.md   # Detailed pprof analysis
-└── prompt.txt           # Full prompt sent to Claude (for debugging)
+├── summary.md           # analysis table + explanation (use for PR description)
+├── patch.diff           # unified diff (apply with: git apply)
+├── analyzer_result.md   # detailed pprof analysis
+└── prompt.txt           # full prompt sent to Claude (for debugging)
 ```
-
-### Applying the Patch
 
 ```bash
-# 1. Review the summary
-cat .ai_output/summary.md
-
-# 2. Review the patch
-cat .ai_output/patch.diff
-
-# 3. Apply if satisfied
-git apply .ai_output/patch.diff
-
-# 4. Test
-go test ./...
-go run . -benchmark  # or your perf test
-
-# 5. Commit
-git add -A
-git commit -m "perf: optimize hotspots per pprof analysis
-
-Based on analysis in .ai_output/summary.md
-"
+cat .ai_output/summary.md && cat .ai_output/patch.diff   # review
+git apply .ai_output/patch.diff                           # apply
+go test ./...                                             # verify
+git commit -m "perf: optimize hotspots per pprof analysis"
 ```
 
-## Supporting Skills in Detail
+### Reference levels
 
-### 1. pprof-integrator — Add pprof to Your Service
+- **`low`** — fix only the #1 hotspot; low-effort changes only (pre-allocate, hoist invariants); typically a single file.
+- **`med`** — address the top 3-5 hotspots; low- or medium-effort fixes (algorithm changes within a function/package); good default.
+- **`high`** — analyze every significant hotspot; low/medium/high-effort fixes including architectural changes; larger refactors allowed if the profile justifies them.
 
-**Purpose:** Integrate `net/http/pprof` endpoint into a Go service using the [action/pprof_integration.md](pprof_integration.md) guide.
+## Supporting Skills
 
-**Usage:**
+**pprof-integrator** — integrates `net/http/pprof` using the [action/pprof_integration.md](../action/pprof_integration.md) guide. Detects your framework (gin, echo, fiber, chi, net/http, …) and generates a dedicated pprof server on port 9987.
 ```bash
 /pprof-integrator ./my-service
 ```
 
-**What it does:**
-1. Detects your Go framework (gin, echo, fiber, chi, net/http, etc.)
-2. Reads the pprof integration guide
-3. Generates code changes to add pprof endpoint
-4. You review and commit the changes
-
-**Output:** Code changes (pprofserver.go, main() modifications) to start a dedicated pprof server on port 9987.
-
----
-
-### 2. load-test-generator — Create a Load Test Script
-
-**Purpose:** Analyze your Go service and generate a load test script to drive realistic traffic during profiling.
-
-**Usage:**
+**load-test-generator** — analyzes your service's HTTP endpoints and request patterns, then generates a load test script (k6, Apache Bench, wrk, or custom Go) to drive traffic during profiling.
 ```bash
 /load-test-generator ./my-service --tool k6
 ```
 
-**What it does:**
-1. Analyzes your service code for HTTP endpoints
-2. Extracts typical request patterns
-3. Generates a load test script in your preferred tool (k6, Apache Bench, wrk, custom Go)
-4. You review and run the script during profiling
-
-**Output:** Load test script (e.g., `load_test.js` for k6) ready to run.
-
----
-
-### 3. profiler-executor — Capture Profiling Data
-
-**Purpose:** Run Go CPU profiling with concurrent load testing to capture realistic performance data.
-
-**Usage:**
+**profiler-executor** — builds and starts your service, runs `go tool pprof .../profile?seconds=30` and your load test in parallel, captures `cpu.prof` to `.ai_output/`, then stops the service.
 ```bash
 /profiler-executor ./my-service --load-cmd "k6 run load_test.js" --duration 30
 ```
 
-**What it does:**
-1. Builds your service
-2. Starts it (must have pprof endpoint integrated)
-3. Runs profiler and load test in parallel:
-   - Profiler: `go tool pprof ... > cpu.prof`
-   - Load test: Your load test command
-4. Captures `cpu.prof` to `.ai_output/`
-5. Stops the service
+### Creating a profile manually
 
-**Output:** `cpu.prof` binary profile file ready for analysis.
-
----
-
-### Complete Workflow Example
-
+If pprof is already integrated, you can skip profiler-executor and pull profiles directly:
 ```bash
-# Step 1: Integrate pprof
-/pprof-integrator ./my-service
-# Review and commit code changes
-
-# Step 2: Generate load test
-/load-test-generator ./my-service --tool k6
-# Review load_test.js
-
-# Step 3: Capture profile
-/profiler-executor ./my-service --load-cmd "k6 run load_test.js"
-# .ai_output/cpu.prof now exists
-
-# Step 4: Analyze and generate fixes
-/pprof-analyzer ./my-service --profile .ai_output/cpu.prof --reference med
-# Review .ai_output/summary.md and .ai_output/patch.diff
-
-# Step 5: Apply patch and test
-git apply .ai_output/patch.diff
-go test ./...
-go run . -benchmark
-git commit -m "perf: optimize based on pprof analysis"
-```
-
-## Reference Levels
-
-### `low` — Single Hotspot, Low-Effort Fixes
-
-Best for: Conservative optimization, quick analysis
-
-- Fix only the #1 highest-impact hotspot
-- Only low-effort changes (pre-allocate, hoist invariants, avoid redundant work)
-- Minimal code changes
-- Single file typically
-
-### `med` — Top Hotspots, Medium-Effort Fixes
-
-Best for: Balanced optimization, typical use case
-
-- Address top 3-5 hotspots
-- Allow low or medium-effort fixes (algorithm changes within function/package)
-- Multiple files OK
-- Good return on investment
-
-### `high` — All Significant Hotspots, Comprehensive Fixes
-
-Best for: Deep optimization, architectural changes allowed
-
-- Analyze every significant hotspot
-- Allow low, medium, and high-effort fixes (including architecture changes)
-- Larger refactors OK (if justified by profile data)
-- Deepest analysis
-
-## Example Workflow
-
-```bash
-# 1. Generate a CPU profile for your Go service (or use profiler-executor skill)
-curl http://localhost:9987/debug/pprof/profile?seconds=30 > cpu.prof
-
-# 2. Run the skill (no API keys needed - uses Claude's built-in capabilities!)
-/pprof-analyzer cpu.prof ./ med
-
-# 3. Review results
-cat .ai_output/summary.md
-
-# Sample output:
-# | ID | File | Function | Self % | Reduction | Confidence | Priority |
-# |---|---|---|---|---|---|---|
-# | 1 | main.go | parseRequest | 12.5% | 12.5% | High (n=5000) | 1 |
-# | 2 | cache/cache.go | Get | 8.2% | 8.2% | High (n=5000) | 2 |
-
-# 4. Review the patch
-cat .ai_output/patch.diff
-
-# 5. Test locally
-git apply .ai_output/patch.diff
-go test ./...
-go run . -benchtime=10s
-
-# 6. If satisfied, commit
-git add -A
-git commit -m "perf: optimize request parsing and caching"
-git push
-
-# 7. Re-profile to measure improvement
-curl http://localhost:6060/debug/pprof/profile?seconds=30 > cpu-after.prof
+curl http://localhost:9987/debug/pprof/profile?seconds=30 > cpu.prof   # CPU
+curl http://localhost:9987/debug/pprof/heap > mem.prof                 # memory
+curl http://localhost:9987/debug/pprof/goroutine > goroutines.prof     # goroutines
 ```
 
 ## Troubleshooting
 
-### "pprof-to-md not found"
-
-```bash
-npm install -g pprof-to-md
-```
-
-### Patch doesn't apply cleanly
-
-1. Check the prompt: `cat .ai_output/prompt.txt`
-2. Try a different reference level: `/pprof-analyze profile.prof ./ low`
-3. Try a different model: `/pprof-analyze --model gpt-4o profile.prof ./ med`
-
-See [INSTALL.md](INSTALL.md) for more troubleshooting.
-
-## How Hotspots Are Extracted
-
-The skill automatically:
-
-1. **Converts** the pprof binary with `pprof-to-md --format detailed`
-2. **Parses** the output to find file paths (e.g., `main.go`, `utils/cache.go`)
-3. **Includes** those files + their direct imports
-4. **Caps** total code at ~75KB to stay within Claude's context window
-5. **Passes** everything to Claude upfront
-
-This "smart selection" means you get all the context Claude needs without manual setup.
-
-## Creating a Profile
-
-### Automated: Use profiler-executor
-
-**Recommended:** Use the `profiler-executor` skill to automatically capture profiles with load testing:
-
-```bash
-/profiler-executor ./my-service --load-cmd "k6 run load_test.js" --duration 30
-```
-
-This runs profiling with realistic load, capturing to `.ai_output/cpu.prof`.
-
-### Manual: Extract Profile from Running Service
-
-If you already have pprof integrated (via `pprof-integrator` or manually), you can extract profiles manually:
-
-#### CPU Profile (30 seconds)
-
-```bash
-curl http://localhost:9987/debug/pprof/profile?seconds=30 > cpu.prof
-```
-
-#### Memory Profile
-
-```bash
-curl http://localhost:9987/debug/pprof/heap > mem.prof
-```
-
-#### Goroutine Profile
-
-```bash
-curl http://localhost:9987/debug/pprof/goroutine > goroutines.prof
-```
-
-#### Using pprof CLI
-
-```bash
-# Generate profile
-go tool pprof http://localhost:9987/debug/pprof/profile
-
-# Save to file (inside pprof interactive)
-(pprof) save /tmp/cpu.prof
-```
-
-See [pprof_integration.md](pprof_integration.md) for how to integrate pprof into your Go service, or use `pprof-integrator` skill for automated integration.
-
-## No API Keys Required
-
-Unlike the GitHub Action, the Claude Code skill:
-- ✅ Uses Claude's built-in capabilities (no external API calls)
-- ✅ No API keys or endpoint configuration needed
-- ✅ Works entirely within Claude Code
-- ✅ Zero credentials to manage
-
-The GitHub Action variant (if using external LLM services) would have API costs, but the Claude Code skill version is included with your Claude Code subscription.
-
-## Sharing the Skill
-
-The entire skill is portable and can be shared with teammates:
-
-```bash
-# Share the pre-built zip file (skill/pprof-analyzer-skill.zip)
-# Each teammate can extract and install:
-unzip pprof-analyzer-skill.zip
-cd pprof-analyzer-skill/
-./SETUP.sh install
-```
-
-To rebuild the ZIP after making changes, run from the repository root:
-
-```bash
-.claude/skills/build-zip.sh
-```
+- **"pprof-to-md not found"** — `npm install -g pprof-to-md`
+- **Patch doesn't apply cleanly** — inspect `.ai_output/prompt.txt` to see exactly what Claude received, then retry with a different `reference_level` (e.g. `low` for a smaller, safer patch)
+- More detail: [INSTALL.md](INSTALL.md)
 
 ## Development
 
-### Running Tests
-
 ```bash
-pip install pytest
-pytest .claude/skills/pprof-analyzer/tests/
+pytest skill/pprof_analyzer/tests/   # one skill's tests
+pytest skill/*/tests/                # all skill tests
 ```
 
-### Adding Features
+- **Prompt**: edit [prompts/prompt_template.txt](../prompts/prompt_template.txt) (shared with the Action and MCP server — see [AGENTS.md](../AGENTS.md) for the sync rules) — key placeholders are `{reference_level}`, `{analyzer_result}`, `{file_list}`.
+- **File listing**: `gather_local_context()` in `skill/pprof_analyzer/analyzer.py`.
+- **Rebuild the distributed ZIP** after any change under `skill/` or to `action/pprof_integration.md`: `skill/build-zip.sh`.
 
-The skill is designed to be minimal and focused. Any major changes should be discussed before implementing.
+The skill is designed to be minimal — discuss any major change before implementing (see [AGENTS.md](../AGENTS.md)).
 
-### Reporting Issues
+### Known limitations
 
-Include:
-1. `.ai_output/prompt.txt` (what was sent to Claude)
-2. `.ai_output/patch.diff` (what Claude returned)
-3. Claude/OpenAI API error messages (if any)
+- No iterative refinement: if Claude's patch is wrong, there's no automatic retry — try a different `reference_level` instead.
+- No PR creation: the skill only writes artifacts; you apply the patch and open the PR yourself.
+
+## FAQ
+
+**Why not use a custom agent loop like the Action?** Claude Code already gives Claude a native `Read` tool — no need to reimplement a `read_file` request/response loop in Python.
+
+**Can I add more files to the analysis?** No cap to change — Claude reads whatever it decides it needs.
+
+**How much does it cost?** Nothing extra — it uses Claude Code's built-in model, no external API calls.
+
+**Can I use a different LLM?** Not with this skill; it's built for Claude Code. The GitHub Action supports OpenAI-compatible endpoints if you need that.
+
+**Does it work on Windows?** Yes, via WSL2 or Python 3.11+ with Git Bash (`SETUP.sh` is bash).
+
+## Reporting issues
+
+Include `.ai_output/prompt.txt` (what was sent to Claude) and `.ai_output/patch.diff` (what came back).
 
 ## License
 
@@ -477,10 +195,6 @@ Same as the pprof-analyzer action.
 
 ## See Also
 
-- [pprof_integration.md](pprof_integration.md) — How to add pprof endpoints to your Go service
-- [INSTALL.md](INSTALL.md) — Detailed installation guide
-- [examples/](examples/) — Example profiles and expected outputs
-
----
-
-**Questions?** Check [INSTALL.md](INSTALL.md) for detailed setup, or review `.ai_output/prompt.txt` after running the skill to see exactly what Claude received.
+- [action/pprof_integration.md](../action/pprof_integration.md) — how to add pprof endpoints to a Go service
+- [INSTALL.md](INSTALL.md) — detailed installation guide
+- [AGENTS.md](../AGENTS.md) — architecture and sync rules across Action/Skill/MCP implementations

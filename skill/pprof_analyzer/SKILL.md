@@ -17,13 +17,12 @@ Analyze Go pprof profiles and generate performance optimization patches using Cl
 ## Workflow
 
 1. Validates inputs and converts pprof profile to markdown via `pprof-to-md`
-2. Intelligently selects relevant Go source files from hotspots (capped at ~75KB)
-3. Reads all source code upfront
-4. Constructs comprehensive prompt with profile + source code + reference level instructions
-5. Sends to Claude for single-turn analysis
-6. Extracts SUMMARY and PATCH sections from response
-7. Validates patch with `git apply --check`
-8. Writes artifacts to `.ai_output/` for review
+2. Lists the repository's Go files (via `git ls-files`)
+3. Constructs a prompt with the profile markdown + file list + reference level instructions
+4. Sends to Claude, which uses its own `Read` tool to pull specific files as needed while writing the patch
+5. Extracts SUMMARY and PATCH sections from Claude's response
+6. Validates patch with `git apply --check`
+7. Writes artifacts to `.ai_output/` for review
 
 ## Output
 
@@ -55,8 +54,7 @@ Analyzes the CPU profile at medium depth (top 3-5 hotspots, medium-effort fixes)
 
 ## Key Features
 
-✅ Single-turn analysis — No agent loops, all context upfront  
-✅ Smart file selection — Only includes relevant source code  
+✅ File-list based — Claude reads specific files on demand via its own `Read` tool, not a bulk upfront dump  
 ✅ Full transparency — Complete prompt/response saved for debugging  
 ✅ Patch validation — Ensures patches apply cleanly  
 ✅ Zero credentials needed — Uses Claude Code's built-in Claude  

@@ -12,9 +12,11 @@ updates:
       - "dependencies"
       - "github-actions"
 
-  # Keep Python dependencies in action/scripts/requirements.txt up to date
+  # Keep Python dependencies in pyproject.toml and action/scripts/requirements.txt up to date
   - package-ecosystem: "pip"
-    directory: "/action/scripts"
+    directories:
+      - "/"
+      - "/action/scripts"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2

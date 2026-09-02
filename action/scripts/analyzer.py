@@ -1060,7 +1060,7 @@ def main() -> int:
         print(f"ERROR during initialization: {exc.message}", file=sys.stderr)
         return 2
 
-    prompt_template = config.action_path / "action" / "scripts" / "prompts" / "prompt_template.txt"
+    prompt_template = config.action_path / "prompts" / "prompt_template.txt"
 
     # File-based (testing) mode: when ANALYZER_RESULT_FILE is set, load a
     # raw pprof profile from a local file and skip all SERVICE_URL

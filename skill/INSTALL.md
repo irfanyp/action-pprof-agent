@@ -266,10 +266,8 @@ After installation, skills are located at:
 
 For issues or questions:
 
-1. Check [README.md](README.md) for usage examples
-2. See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
-3. Review [SKILL_DISTRIBUTION.md](SKILL_DISTRIBUTION.md) for sharing/distribution info
-4. Check logs: `./SETUP.sh verify` shows detailed diagnostics
+1. Check [README.md](README.md) for usage, design, and distribution details
+2. Check logs: `./SETUP.sh verify` shows detailed diagnostics
 
 ## Next Steps
 
