@@ -31,3 +31,6 @@ skill/pprof-analyzer-skill.zip
 
 # Other
 server/
+
+# Local secrets
+.apikey

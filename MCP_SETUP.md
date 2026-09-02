@@ -96,13 +96,23 @@ Edit `~/.cursor/settings/claude_desktop_config.json` (same as Claude Desktop abo
 
 ## Team Collaboration (HTTP/SSE)
 
-**Server machine:**
+**Server machine:** binding to `0.0.0.0` makes `run_cpu_profile` reachable by
+anyone on the network who can hit the port — it builds and runs arbitrary
+repo code, so set `MCP_API_KEY` before doing this:
 ```bash
+export MCP_API_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 python3 mcp_server_http.py --host 0.0.0.0 --port 8000
-# Share: http://<server-ip>:8000/sse
+# Share: http://<server-ip>:8000/sse  (and the API key, out of band)
 ```
 
-**Team members:** Use shared URL in their agent config (see above).
+**Team members:** use the shared URL in their agent config, with an
+`X-API-Key: <key>` header. For Claude Code, add it with `-H` and register at
+`local` (not `project`) scope so the key doesn't land in the shared,
+git-tracked `.mcp.json`:
+```bash
+claude mcp add --transport sse pprof-analyzer http://<server-ip>:8000/sse \
+  -H "X-API-Key: <key>" -s local
+```
 
 ---
 
@@ -142,6 +152,19 @@ docker run -d \
 ```
 
 This binds directly to VM port `8000` with no NAT overhead.
+
+**Using a custom port:** the image's `HEALTHCHECK` reads the `MCP_HTTP_PORT`
+env var (default `8000`) to know which port to probe. If you override the
+port via `--port`, set `-e MCP_HTTP_PORT=<port>` too, or the healthcheck will
+probe the wrong port and the container will show as `unhealthy` even though
+the server is working fine:
+```bash
+docker run -d \
+  --network host \
+  --name mcp-server \
+  -e MCP_HTTP_PORT=8991 \
+  pprof-analyzer-mcp --port 8991
+```
 
 ### Docker Compose
 ```yaml
@@ -218,6 +241,15 @@ python3 mcp_server_http.py --port 9000
 python3 mcp_server_http.py --host 0.0.0.0 --port 8000
 ```
 
+**Container shows `unhealthy` despite the server working:**
+```bash
+# The HEALTHCHECK probes $MCP_HTTP_PORT (default 8000). If you passed a
+# custom --port without also setting MCP_HTTP_PORT, it's probing the wrong
+# port. Recreate the container with matching values, e.g.:
+docker run -d --network host --name mcp-server \
+  -e MCP_HTTP_PORT=8991 pprof-analyzer-mcp --port 8991
+```
+
 **Import errors:**
 ```bash
 pip install -e .
@@ -242,6 +274,7 @@ docker run -it pprof-analyzer-mcp /bin/bash  # Debug shell
 
 **Docker reference:**
 - Default port: `8000`
+- `MCP_HTTP_PORT` env var: must match `--port` or the `HEALTHCHECK` probes the wrong port
 - Health: `GET /health`
 - MCP SSE: `GET /sse`
 - Docs: `GET /docs`
