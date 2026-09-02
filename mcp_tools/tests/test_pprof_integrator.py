@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from skill.pprof_integrator.coordinator import run_integrator
+
 
 class TestIntegratePprofEndpoint:
     """Test suite for integrate_pprof_endpoint tool."""
@@ -45,3 +47,34 @@ class TestIntegratePprofEndpoint:
 
         with pytest.raises(ValueError):
             integrate_pprof_endpoint(str(repo))
+
+
+class TestVerifyLocalPaths:
+    """Test suite for the PPROF_VERIFY_LOCAL_PATHS env var (remote-deployment support).
+
+    Exercises the real (unmocked) run_integrator(), since a repo_path from a remote
+    caller never exists on this host — the mocked mcp_tools fixtures wouldn't catch
+    a regression here.
+    """
+
+    def test_nonexistent_repo_fails_by_default(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("PPROF_VERIFY_LOCAL_PATHS", raising=False)
+        with pytest.raises(FileNotFoundError):
+            run_integrator(str(tmp_path / "nonexistent"))
+
+    def test_nonexistent_repo_succeeds_when_verification_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PPROF_VERIFY_LOCAL_PATHS", "false")
+        repo_path = str(tmp_path / "nonexistent")
+
+        prompt = run_integrator(repo_path)
+
+        assert repo_path in prompt
+
+    def test_path_is_not_resolved_when_verification_disabled(self, monkeypatch):
+        monkeypatch.setenv("PPROF_VERIFY_LOCAL_PATHS", "false")
+        relative_path = "some/relative/repo"
+
+        prompt = run_integrator(relative_path)
+
+        # Should be embedded exactly as given, not resolved against this host's cwd.
+        assert relative_path in prompt

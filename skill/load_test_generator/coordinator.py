@@ -6,8 +6,19 @@ load-test-generator coordinator: Analyzes Go service endpoints and prepares for 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+
+def _verify_local_paths() -> bool:
+    """Whether to validate repo_path against this process's own filesystem.
+
+    Defaults to True (today's behavior). Set PPROF_VERIFY_LOCAL_PATHS=false on a
+    remote/shared MCP deployment, where repo_path is a path on the *caller's*
+    machine and can never be validated against the server's filesystem.
+    """
+    return os.environ.get("PPROF_VERIFY_LOCAL_PATHS", "true").strip().lower() not in {"0", "false", "no"}
 
 
 def run_load_test_generator(repo_path: str | Path, tool: str = "k6") -> str:
@@ -24,24 +35,24 @@ def run_load_test_generator(repo_path: str | Path, tool: str = "k6") -> str:
         FileNotFoundError: If repo not found
         ValueError: If repo is not valid or tool is invalid
     """
-    repo_path = Path(repo_path).resolve()
     tool = tool.lower()
-
-    if not repo_path.exists():
-        raise FileNotFoundError(f"Repository path does not exist: {repo_path}")
-
-    if not (repo_path / "go.mod").exists():
-        raise ValueError(f"Not a Go module (no go.mod found): {repo_path}")
 
     # Validate tool choice
     valid_tools = {"k6", "apache-bench", "wrk", "go"}
     if tool not in valid_tools:
         raise ValueError(f"Invalid tool: {tool}. Must be one of: {valid_tools}")
 
-    # Analyze repository structure
-    go_files = list(repo_path.glob("**/*.go"))
-    if not go_files:
-        raise ValueError(f"No Go source files found in {repo_path}")
+    if _verify_local_paths():
+        repo_path = Path(repo_path).resolve()
+
+        if not repo_path.exists():
+            raise FileNotFoundError(f"Repository path does not exist: {repo_path}")
+
+        if not (repo_path / "go.mod").exists():
+            raise ValueError(f"Not a Go module (no go.mod found): {repo_path}")
+
+        if not list(repo_path.glob("**/*.go")):
+            raise ValueError(f"No Go source files found in {repo_path}")
 
     prompt = f"""Analyze this Go repository and generate a load test script.
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 
@@ -82,3 +84,48 @@ class TestAnalyzePprofProfile:
             analyze_pprof_profile(profile_path, repo_path, level)
             args = mock_run_analyzer.call_args[0]
             assert args[2] == level
+
+
+class TestBuildPprofAnalysisPrompt:
+    """Test suite for build_pprof_analysis_prompt (remote-safe, content-only) tool."""
+
+    @pytest.fixture
+    def mock_build_analysis_prompt(self, monkeypatch, load_tools):
+        mock = MagicMock(return_value="Mocked remote analysis prompt")
+        monkeypatch.setattr(load_tools["pprof_analyzer"], "build_analysis_prompt", mock)
+        return mock
+
+    def test_calls_build_analysis_prompt_with_correct_args(self, mock_build_analysis_prompt, load_tools):
+        build_pprof_analysis_prompt = load_tools["pprof_analyzer"].build_pprof_analysis_prompt
+
+        analyzer_result = "## Hotspot\nmain.go:10"
+        file_list = ["main.go", "util.go"]
+        reference_level = "high"
+
+        result = build_pprof_analysis_prompt(analyzer_result, file_list, reference_level)
+
+        mock_build_analysis_prompt.assert_called_once_with(analyzer_result, file_list, reference_level)
+        assert result == "Mocked remote analysis prompt"
+
+    def test_uses_default_reference_level(self, mock_build_analysis_prompt, load_tools):
+        build_pprof_analysis_prompt = load_tools["pprof_analyzer"].build_pprof_analysis_prompt
+
+        build_pprof_analysis_prompt("analyzer result", ["main.go"])
+
+        args = mock_build_analysis_prompt.call_args[0]
+        assert args[2] == "med"
+
+    def test_does_not_touch_filesystem(self, mock_build_analysis_prompt, load_tools):
+        """No profile_path/repo_path params at all — nothing here can hit the server's disk."""
+        build_pprof_analysis_prompt = load_tools["pprof_analyzer"].build_pprof_analysis_prompt
+
+        import inspect
+        params = inspect.signature(build_pprof_analysis_prompt).parameters
+        assert set(params) == {"analyzer_result", "file_list", "reference_level"}
+
+    def test_propagates_value_error(self, mock_build_analysis_prompt, load_tools):
+        build_pprof_analysis_prompt = load_tools["pprof_analyzer"].build_pprof_analysis_prompt
+        mock_build_analysis_prompt.side_effect = ValueError("Invalid reference level")
+
+        with pytest.raises(ValueError):
+            build_pprof_analysis_prompt("analyzer result", ["main.go"], "invalid")

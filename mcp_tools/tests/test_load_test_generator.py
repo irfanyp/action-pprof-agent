@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from skill.load_test_generator.coordinator import run_load_test_generator
+
 
 class TestGenerateLoadTest:
     """Test suite for generate_load_test tool."""
@@ -76,3 +78,30 @@ class TestGenerateLoadTest:
 
         with pytest.raises(ValueError):
             generate_load_test(str(tmp_repo_path), "invalid-tool")
+
+
+class TestVerifyLocalPaths:
+    """Test suite for the PPROF_VERIFY_LOCAL_PATHS env var (remote-deployment support).
+
+    Exercises the real (unmocked) run_load_test_generator(), since a repo_path from a
+    remote caller never exists on this host — the mocked mcp_tools fixtures wouldn't
+    catch a regression here.
+    """
+
+    def test_nonexistent_repo_fails_by_default(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("PPROF_VERIFY_LOCAL_PATHS", raising=False)
+        with pytest.raises(FileNotFoundError):
+            run_load_test_generator(str(tmp_path / "nonexistent"))
+
+    def test_nonexistent_repo_succeeds_when_verification_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PPROF_VERIFY_LOCAL_PATHS", "false")
+        repo_path = str(tmp_path / "nonexistent")
+
+        prompt = run_load_test_generator(repo_path)
+
+        assert repo_path in prompt
+
+    def test_invalid_tool_still_rejected_when_verification_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PPROF_VERIFY_LOCAL_PATHS", "false")
+        with pytest.raises(ValueError):
+            run_load_test_generator(str(tmp_path / "nonexistent"), "invalid-tool")

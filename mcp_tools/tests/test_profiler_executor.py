@@ -9,6 +9,11 @@ import pytest
 class TestRunCpuProfile:
     """Test suite for run_cpu_profile tool."""
 
+    @pytest.fixture(autouse=True)
+    def enable_cpu_profile(self, monkeypatch):
+        """run_cpu_profile is opt-in (MCP_ENABLE_CPU_PROFILE); enable it for these tests."""
+        monkeypatch.setenv("MCP_ENABLE_CPU_PROFILE", "1")
+
     def test_calls_run_profiler_with_correct_args(self, tmp_repo_path, mock_run_profiler, load_tools):
         """Test that run_cpu_profile calls run_profiler with correct arguments."""
         run_cpu_profile = load_tools["profiler_executor"].run_cpu_profile
@@ -144,3 +149,37 @@ class TestRunCpuProfile:
         # Lock should be released
         assert lock.acquire(blocking=False)
         lock.release()
+
+
+class TestCpuProfileGate:
+    """Test suite for the MCP_ENABLE_CPU_PROFILE opt-in gate."""
+
+    def test_disabled_by_default(self, monkeypatch, tmp_repo_path, mock_run_profiler, load_tools):
+        """Test that run_cpu_profile refuses to run when the env var is unset."""
+        monkeypatch.delenv("MCP_ENABLE_CPU_PROFILE", raising=False)
+        run_cpu_profile = load_tools["profiler_executor"].run_cpu_profile
+
+        with pytest.raises(RuntimeError, match="disabled"):
+            run_cpu_profile(str(tmp_repo_path))
+
+        mock_run_profiler.assert_not_called()
+
+    def test_disabled_when_falsy(self, monkeypatch, tmp_repo_path, mock_run_profiler, load_tools):
+        """Test that an empty/falsy value also disables the tool."""
+        monkeypatch.setenv("MCP_ENABLE_CPU_PROFILE", "")
+        run_cpu_profile = load_tools["profiler_executor"].run_cpu_profile
+
+        with pytest.raises(RuntimeError, match="disabled"):
+            run_cpu_profile(str(tmp_repo_path))
+
+        mock_run_profiler.assert_not_called()
+
+    def test_enabled_when_set(self, monkeypatch, tmp_repo_path, mock_run_profiler, load_tools):
+        """Test that setting the env var allows run_cpu_profile to proceed."""
+        monkeypatch.setenv("MCP_ENABLE_CPU_PROFILE", "1")
+        run_cpu_profile = load_tools["profiler_executor"].run_cpu_profile
+
+        result = run_cpu_profile(str(tmp_repo_path))
+
+        mock_run_profiler.assert_called_once()
+        assert "cpu.prof" in result

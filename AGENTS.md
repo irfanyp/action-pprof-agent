@@ -73,25 +73,23 @@ The action runs these steps in sequence:
 The skill runs these steps locally (simplified, single-turn analysis):
 
 1. **Validate inputs** — Check profile file, repo path, reference level (no external API keys needed).
-2. **Convert pprof** — Run `pprof-to-md --format detailed` to convert raw profile to markdown.
-3. **Extract hotspots** — Parse markdown to find file paths and function names mentioned in hotspots.
-4. **Find Go files** — Use `git ls-files` to enumerate all Go files in repo.
-5. **Smart select files** — Include hotspot files + direct imports (recursively to depth 2), cap at ~75KB of code.
-6. **Read source code** — Read all selected files with line numbers, format as `L{num}| {content}`.
-7. **Build prompt** — Combine reference level instructions + pprof markdown + source code in prompt template.
-8. **Return for analysis** — Return prompt + context to Claude (Claude Code will handle the analysis call).
-9. **Extract SUMMARY & PATCH** — Parse Claude's response for `### SUMMARY` and `### PATCH` sections.
-10. **Validate patch** — Run `git apply --check` to dry-run the patch.
-11. **Write artifacts** — Save to `.ai_output/`:
+2. **Convert pprof** — Run `pprof-to-md --format detailed` to convert raw profile to markdown (`gather_local_context()`).
+3. **Find Go files** — Use `git ls-files` to enumerate all Go files in repo (`gather_local_context()`).
+4. **Build prompt** — Combine reference level instructions + pprof markdown + the file list (not file content) in the prompt template (`build_analysis_prompt()`), matching `prompts/prompt_template.txt`'s `{file_list}` contract.
+5. **Return for analysis** — Return prompt + context to Claude (Claude Code will handle the analysis call).
+6. **Extract SUMMARY & PATCH** — Parse Claude's response for `### SUMMARY` and `### PATCH` sections.
+7. **Validate patch** — Run `git apply --check` to dry-run the patch.
+8. **Write artifacts** — Save to `.ai_output/`:
     - `summary.md` — Analysis table + explanation
     - `patch.diff` — Unified diff patch
     - `analyzer_result.md` — Pprof analysis
     - `prompt.txt` — Full prompt sent to Claude
 
+`gather_local_context(profile_path, repo_path)` (steps 2-3) and `build_analysis_prompt(analyzer_result, file_list, reference_level)` (step 4) are split so the latter can run without any access to the caller's profile/repo — see `mcp_tools/tools/pprof_analyzer.py::build_pprof_analysis_prompt` and [MCP_SETUP.md](MCP_SETUP.md#team-collaboration-httpsse) for the remote-MCP use of this split.
+
 **Key differences from Action:**
 - ✅ No external LLM API calls (uses Claude's built-in capabilities in Claude Code)
-- ✅ No `read_file` tool loop (all code read upfront, single-turn analysis)
-- ✅ Single-turn analysis (no retries, no agent loops)
+- ✅ No custom `read_file` tool-call loop in Python — Claude's own native `Read` tool serves the same purpose against the local repo, given just the file list (same idea as the Action's loop, different mechanism)
 - ✅ No PR creation (user applies patch manually)
 - ✅ No SERVICE_URL interaction or polling
 - ✅ No credentials/API keys needed (uses Claude Code's native integration)
@@ -101,7 +99,7 @@ The skill runs these steps locally (simplified, single-turn analysis):
 - Skill takes CLI args: `profile_path`, `repo_path`, `reference_level` (low/med/high)
 - No EnvConfig class (no external API configuration needed)
 - No network calls or polling logic
-- No multi-turn agent loop or tool-use framework
+- No custom Python agent-loop/tool-use framework — relies on Claude Code's native `Read` tool instead
 - Focuses solely on context gathering and prompt construction
 - Claude (in Claude Code context) performs the actual analysis
 
@@ -199,10 +197,10 @@ The two implementations ([action/scripts/analyzer.py](action/scripts/analyzer.py
 - Requires: `litellm`, `requests`, `GitPython`
 
 **Claude Code Skill (skill/pprof-analyzer/analyzer.py):**
-- Local context gathering only (424 lines)
+- Local context gathering only (~350 lines)
 - No external LLM API calls
-- Reads all code upfront using `smart_select_files()`
-- Returns prompt for Claude (in Claude Code context) to analyze
+- Gathers a bare Go file list via `gather_local_context()` (matches the template's `{file_list}` contract — no source content is read or inlined by this file)
+- Returns prompt for Claude (in Claude Code context) to analyze; Claude's own `Read` tool pulls specific files on demand, same idea as the Action's `read_file` loop
 - No patch application or PR creation
 - Requires: `GitPython` only (stdlib for everything else)
 
@@ -248,6 +246,8 @@ These elements appear in both files and should stay synchronized:
 - ✅ Update `prompt_template.txt` — If prompt structure changes (used by Action + Skill)
 - ✅ Update pprof-to-md invocation — If command arguments change (used by all three)
 
+**Note:** `skill/pprof_analyzer/analyzer.py`'s `build_prompt()`/`build_analysis_prompt()` now format the file list into the template's `{file_list}` placeholder (matching `action/scripts/analyzer.py::construct_prompt()`'s `file_list` parameter). Previously it inlined full source into a `source_code` kwarg that the template never defined, which raised `KeyError` on every real invocation — fixed as part of enabling remote MCP use (see [MCP_SETUP.md](MCP_SETUP.md#team-collaboration-httpsse)).
+
 **Action-only changes (no sync needed):**
 - ❌ Changes to `read_file_context()`, `_execute_read_file_tool()`, `call_llm()` — Skill doesn't use agent loop
 - ❌ Changes to `apply_patch()`, `create_pull_request()` — Skill doesn't apply patches
@@ -255,7 +255,7 @@ These elements appear in both files and should stay synchronized:
 - ❌ Changes to GitHub Actions step tracking and annotations
 
 **Skill-only changes (no sync needed):**
-- ❌ Changes to `smart_select_files()`, `find_imports_in_file()` — Action uses simpler file listing
+- ❌ Changes to `gather_local_context()`, `build_analysis_prompt()` — Action gathers/formats its file list differently (`list_repo_files()`)
 - ❌ Changes to artifact output location (`.ai_output/` vs `artifacts/`) — Directories differ by design
 
 **MCP-only changes (no sync needed):**

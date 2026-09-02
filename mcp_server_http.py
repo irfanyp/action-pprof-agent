@@ -108,6 +108,7 @@ async def root():
         },
         "tools": [
             "analyze_pprof_profile",
+            "build_pprof_analysis_prompt",
             "integrate_pprof_endpoint",
             "generate_load_test",
             "run_cpu_profile",

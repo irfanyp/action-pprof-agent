@@ -114,10 +114,11 @@ Create `.cline_mcp_settings.json` in your project root:
 
 | Tool | Parameters | Returns | Notes |
 |------|-----------|---------|-------|
-| `analyze_pprof_profile` | `profile_path: str`, `repo_path: str`, `reference_level: str = "med"` | Analysis prompt for LLM | Returns markdown prompt; LLM generates patches |
-| `integrate_pprof_endpoint` | `repo_path: str` | Integration guidance prompt | Returns prompt for pprof endpoint setup |
-| `generate_load_test` | `repo_path: str`, `tool: str = "k6"` | Load test generation prompt | Tool choices: `k6`, `apache-bench`, `wrk`, `go` |
-| `run_cpu_profile` | `repo_path: str`, `port: int = 8080`, `load_cmd: str \| None`, `duration: int = 30` | Profile location + summary | ~30s typical latency, up to 120s+ for slow builds |
+| `analyze_pprof_profile` | `profile_path: str`, `repo_path: str`, `reference_level: str = "med"` | Analysis prompt for LLM | Path-based; requires `profile_path`/`repo_path` to exist on the machine running the MCP server (local/stdio only) |
+| `build_pprof_analysis_prompt` | `analyzer_result: str`, `file_list: list[str]`, `reference_level: str = "med"` | Analysis prompt for LLM | Content-only, remote-safe variant of `analyze_pprof_profile` — see [MCP_SETUP.md](../MCP_SETUP.md#team-collaboration-httpsse) |
+| `integrate_pprof_endpoint` | `repo_path: str` | Integration guidance prompt | Returns prompt for pprof endpoint setup; set `PPROF_VERIFY_LOCAL_PATHS=false` server-side for remote callers |
+| `generate_load_test` | `repo_path: str`, `tool: str = "k6"` | Load test generation prompt | Tool choices: `k6`, `apache-bench`, `wrk`, `go`; same `PPROF_VERIFY_LOCAL_PATHS` note as above |
+| `run_cpu_profile` | `repo_path: str`, `port: int = 8080`, `load_cmd: str \| None`, `duration: int = 30` | Profile location + summary | ~30s typical latency, up to 120s+ for slow builds; disabled unless `MCP_ENABLE_CPU_PROFILE=1` is set on the server |
 
 ## Concurrency Behavior
 

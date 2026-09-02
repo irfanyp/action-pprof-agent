@@ -114,6 +114,31 @@ claude mcp add --transport sse pprof-analyzer http://<server-ip>:8000/sse \
   -H "X-API-Key: <key>" -s local
 ```
 
+**What actually works once the server and your repo/profile are on different
+machines:** every tool takes `repo_path`/`profile_path` as strings and opens
+them directly — over HTTP those are just text sent from your machine, so the
+server tries to open *your* local paths on *its own* disk and fails (or, if a
+coincidentally-valid path exists on the server, reads the wrong thing).
+
+- `integrate_pprof_endpoint` and `generate_load_test` don't actually read any
+  repo content — they only sanity-check that `repo_path` exists and has a
+  `go.mod`, then return a generic prompt with `repo_path` embedded as a label
+  for your own agent to inspect locally. Set `PPROF_VERIFY_LOCAL_PATHS=false`
+  on the server to skip that check (it can never pass for a remote caller
+  anyway), and these two tools work as-is.
+- `analyze_pprof_profile` does need real content (the converted profile +
+  which Go files exist), so it can't be called with a bare path remotely. Use
+  `build_pprof_analysis_prompt` instead: run `pprof-to-md --format detailed
+  <profile> -o result.md` and `git ls-files -- '*.go'` **on your own machine**,
+  then pass their output as `analyzer_result`/`file_list`. Nothing but that
+  derived text ever crosses the network — the raw profile and your repo's
+  source never leave your machine.
+- `run_cpu_profile` builds and executes the target repo's code on whatever
+  host runs it, which can't be redesigned around — it's disabled by default
+  (even with `MCP_API_KEY` set) since profiling normally happens locally
+  anyway. Set `MCP_ENABLE_CPU_PROFILE=1` on the server only if you specifically
+  want the cloud host itself to build+run repos (single-tenant/trusted use).
+
 ---
 
 ## Verification

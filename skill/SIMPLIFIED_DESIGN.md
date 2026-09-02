@@ -133,11 +133,8 @@ git apply .ai_output/patch.diff
 ### Step 1: Prepare Context
 ```python
 # analyzer.py does:
-profile_data = read(cpu.prof)
-analyzer_result = run_pprof_to_md(profile_data)
-hotspot_files = extract_files(analyzer_result)
-source_code = read_source_files(hotspot_files)
-prompt = build_prompt(analyzer_result, source_code, reference_level)
+analyzer_result, file_list = gather_local_context(profile_path, repo_path)
+prompt = build_analysis_prompt(analyzer_result, file_list, reference_level)
 ```
 
 ### Step 2: Return to Claude

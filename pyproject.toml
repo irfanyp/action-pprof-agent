@@ -20,7 +20,7 @@ include = ["skill*", "mcp_tools*"]
 exclude = ["action*", "node_modules*", "docs*"]
 
 [tool.pytest.ini_options]
-testpaths = ["action/scripts/tests", "mcp_tools/tests"]
+testpaths = ["action/scripts/tests", "mcp_tools/tests", "skill/pprof_analyzer/tests"]
 pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

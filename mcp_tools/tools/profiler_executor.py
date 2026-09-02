@@ -44,10 +44,17 @@ def run_cpu_profile(
         Profiling summary + location where profile was written
 
     Raises:
-        RuntimeError: If repo validation fails, profiler is already running, or profiling fails
+        RuntimeError: If disabled on this server, repo validation fails, profiler is
+            already running, or profiling fails
         FileNotFoundError: If repo not found
         ValueError: If repo is not valid
     """
+    if not os.environ.get("MCP_ENABLE_CPU_PROFILE"):
+        raise RuntimeError(
+            "run_cpu_profile is disabled on this server; set MCP_ENABLE_CPU_PROFILE=1 to enable. "
+            "It builds and runs arbitrary repo code on this host, which is unsafe on a shared/remote deployment."
+        )
+
     lock = _get_lock(repo_path)
     if not lock.acquire(blocking=False):
         raise RuntimeError(
