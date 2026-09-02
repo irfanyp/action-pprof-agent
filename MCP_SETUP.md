@@ -138,7 +138,6 @@ docker run -p 8000:8000 pprof-analyzer-mcp
 docker run -d \
   --network host \
   --name mcp-server \
-  --restart unless-stopped \
   pprof-analyzer-mcp --port 8000
 ```
 

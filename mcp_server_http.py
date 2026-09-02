@@ -32,33 +32,48 @@ import logging
 import os
 import sys
 from fastapi import FastAPI
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 from starlette.responses import JSONResponse
 from uvicorn import Config, Server
 
 from mcp_tools.main import server  # Import shared server with all tools defined
 
 API_KEY_NAME = "X-API-Key"
+API_KEY_HEADER = API_KEY_NAME.lower().encode("ascii")
 API_KEY_EXEMPT_PATHS = {"/health"}
 
 
-class ApiKeyMiddleware(BaseHTTPMiddleware):
+class ApiKeyMiddleware:
     """Require a matching X-API-Key header when MCP_API_KEY is set.
 
     The mounted MCP tools (notably run_cpu_profile) build, run, and shell out
     on the host, so this server must not be left reachable by any client that
     can hit the port. When MCP_API_KEY is unset, auth is skipped (e.g. local
     development), which is why deployments should always set it.
+
+    This is a plain ASGI middleware rather than a starlette.BaseHTTPMiddleware
+    subclass: BaseHTTPMiddleware buffers/rewraps the downstream response,
+    which breaks the mounted MCP SSE sub-app's streaming responses (the
+    stream would crash with "Unexpected message: http.response.start" right
+    after the first event). A pure ASGI middleware passes scope/receive/send
+    straight through, so streaming is unaffected.
     """
 
-    async def dispatch(self, request: Request, call_next):
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         expected = os.environ.get("MCP_API_KEY")
-        if expected and request.url.path not in API_KEY_EXEMPT_PATHS:
-            provided = (request.headers.get(API_KEY_NAME) or "").encode("utf-8", "ignore")
+        if expected and scope["path"] not in API_KEY_EXEMPT_PATHS:
+            provided = dict(scope["headers"]).get(API_KEY_HEADER, b"")
             if not hmac.compare_digest(provided, expected.encode("utf-8", "ignore")):
-                return JSONResponse({"detail": "Invalid or missing API key"}, status_code=403)
-        return await call_next(request)
+                response = JSONResponse({"detail": "Invalid or missing API key"}, status_code=403)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 # Configure logging
@@ -131,7 +146,7 @@ Examples:
     parser.add_argument(
         "--port",
         type=int,
-        default=8000,
+        default=int(os.environ.get("MCP_HTTP_PORT", 8000)),
         help="Port to listen on (default: 8000)",
     )
     args = parser.parse_args()
