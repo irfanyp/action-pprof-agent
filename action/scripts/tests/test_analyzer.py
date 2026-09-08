@@ -83,7 +83,9 @@ from analyzer import (
     prepare_git_checkout,
     read_file_context,
     trigger_analyzer,
+    validate_llm_endpoint,
 )
+
 
 
 # ============================================================================
@@ -1116,8 +1118,72 @@ Ok.
         assert "could not be turned into" in feedback_msg["content"]
 
 
+class TestValidateLlmEndpoint:
+    """Tests for validate_llm_endpoint() — pre-flight TCP connectivity check.
+
+    validate_llm_endpoint() opens a TCP connection to the AI endpoint's
+    host:port with a short timeout. It catches wrong hostname (DNS failure),
+    wrong port (connection refused), and service down — all within the
+    configured timeout — before litellm is ever called.
+    """
+
+    def test_validate_endpoint_success(self, mocker, mock_config):
+        """A reachable endpoint does not raise."""
+        mock_socket = mocker.patch("analyzer.socket.create_connection")
+        mock_socket.return_value.__enter__ = mocker.MagicMock()
+        mock_socket.return_value.__exit__ = mocker.MagicMock(return_value=False)
+
+        # Should not raise
+        validate_llm_endpoint(mock_config)
+
+    def test_validate_endpoint_dns_failure_raises(self, mocker, mock_config):
+        """A DNS resolution failure raises AnalyzerError('1f')."""
+        import socket as _socket
+        mocker.patch(
+            "analyzer.socket.create_connection",
+            side_effect=_socket.gaierror("DNS failed"),
+        )
+
+        with pytest.raises(AnalyzerError) as exc_info:
+            validate_llm_endpoint(mock_config)
+        assert exc_info.value.step == "1f"
+        assert "unreachable" in exc_info.value.message
+
+    def test_validate_endpoint_connection_refused_raises(self, mocker, mock_config):
+        """A connection refused (wrong port / service down) raises AnalyzerError('1f')."""
+        mocker.patch(
+            "analyzer.socket.create_connection",
+            side_effect=ConnectionRefusedError("Connection refused"),
+        )
+
+        with pytest.raises(AnalyzerError) as exc_info:
+            validate_llm_endpoint(mock_config)
+        assert exc_info.value.step == "1f"
+        assert "unreachable" in exc_info.value.message
+
+    def test_validate_endpoint_uses_config_timeout(self, mocker, mock_config):
+        """The TCP connect timeout uses Config.LLM_ENDPOINT_CONNECT_TIMEOUT_SECONDS."""
+        mock_socket = mocker.patch("analyzer.socket.create_connection")
+        mock_socket.return_value.__enter__ = mocker.MagicMock()
+        mock_socket.return_value.__exit__ = mocker.MagicMock(return_value=False)
+
+        validate_llm_endpoint(mock_config)
+
+        args, kwargs = mock_socket.call_args
+        assert kwargs["timeout"] == Config.LLM_ENDPOINT_CONNECT_TIMEOUT_SECONDS
+
+    def test_validate_endpoint_no_host_raises(self, mocker, mock_config):
+        """An endpoint URL with no host raises AnalyzerError('1f')."""
+        mock_config.ai_endpoint = "not-a-url"
+        with pytest.raises(AnalyzerError) as exc_info:
+            validate_llm_endpoint(mock_config)
+        assert exc_info.value.step == "1f"
+        assert "no host" in exc_info.value.message
+
+
 class TestCallLlm:
     """Tests for call_llm() — LLM API interaction.
+
 
     call_llm() calls litellm.completion() with the given messages and returns
     the response text and messages. Configured with ai_key, ai_endpoint, and
