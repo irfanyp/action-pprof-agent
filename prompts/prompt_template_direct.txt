@@ -10,10 +10,14 @@ Before starting the analysis, determine two required parameters:
 
 2. **Analyzer result file** (the pprof-to-md markdown output):
    - If the user attached or referenced a file (e.g. `@analyzer_result.md`), use that file.
-   - If no file was referenced, search for it in these common locations:
-     - `.ai_output/analyzer_result.md`
-     - `analyzer_result.md` (repo root)
-   - If you cannot find it, **stop and ask the user** to provide the path to the analyzer result file before proceeding.
+   - If no file was referenced, check these common locations in order and use the first one that exists:
+     1. `.ai_output/analyzer_result.md`
+     2. `analyzer_result.md` (repo root)
+    - If you cannot find it, **stop and ask the user** before proceeding. Explain that the analyzer result is a markdown file produced by converting a raw pprof profile (`.pb.gz`, `.prof`, `.pprof`) with the `pprof-to-md` tool, and suggest they generate it with:
+      ```
+      npx pprof-to-md --format detailed <profile_file> -o .ai_output/analyzer_result.md
+      ```
+      (or `pprof-to-md` if installed globally). Note that they need a raw pprof profile first (e.g. `cpu.prof`), typically captured via Go's `net/http/pprof` or `go test -cpuprofile`. Then ask them to either provide the path to an existing analyzer result file, or run the command above and re-attach the output.
 
 Once both parameters are determined, proceed with the analysis below using the reference level you determined.
 
@@ -34,7 +38,7 @@ Sample counts matter: a hotspot backed by very few samples (e.g. a handful out o
 
 ## Analyzer Result (Markdown)
 
-The analyzer result markdown was produced by converting the raw pprof profile with `pprof-to-md`. It describes the hotspots, call stacks, and metrics identified in the profile. Read the analyzer result file you determined above with your native file-reading tool to get the full content.
+The analyzer result markdown was produced by converting the raw pprof profile with `pprof-to-md`. It describes the hotspots, call stacks, and metrics identified in the profile. If its content is not already visible in this conversation, read the analyzer result file you determined above with your native file-reading tool to get the full content.
 
 ## Your Task
 
