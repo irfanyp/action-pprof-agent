@@ -24,11 +24,14 @@ import base64
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import overload
+from urllib.parse import urlparse
+
 
 import git
 import requests
@@ -56,6 +59,9 @@ class Config:
     PPROF_TO_MD_TIMEOUT_SECONDS = 60
     GIT_OPERATIONS_TIMEOUT_SECONDS = 120
     GH_CLI_TIMEOUT_SECONDS = 180
+    LLM_TIMEOUT_SECONDS = 90
+    LLM_NUM_RETRIES = 1
+    LLM_ENDPOINT_CONNECT_TIMEOUT_SECONDS = 10
 
     # Total number of LLM generations attempted for a patch (1 initial +
     # retries). If the patch fails `git apply --check` or extraction, the
@@ -613,12 +619,56 @@ def _resolve_litellm_model(ai_model: str) -> str:
     return ai_model if "/" in ai_model else f"openai/{ai_model}"
 
 
+def validate_llm_endpoint(config: EnvConfig) -> None:
+    """Quick pre-flight TCP connectivity check on the AI endpoint.
+
+    Opens a TCP connection to the endpoint's host:port with a short timeout.
+    Catches wrong hostname (DNS failure), wrong port (connection refused),
+    and service down (connection refused/timeout) — all within
+    ``Config.LLM_ENDPOINT_CONNECT_TIMEOUT_SECONDS`` seconds — *before*
+    litellm is ever called, so a misconfigured endpoint fails in seconds
+    instead of waiting for litellm's retry/timeout cycle (which previously
+    took up to 20 minutes).
+
+    This check is provider-agnostic: it only verifies that *something* is
+    listening at the endpoint URL. It does not validate the API key or model
+    name — those are left to litellm, which fails fast on auth/model errors
+    (non-retryable HTTP 4xx) rather than timing out.
+
+    Raises:
+        AnalyzerError: If the endpoint host cannot be resolved or the TCP
+            connection cannot be established within the timeout.
+    """
+    parsed = urlparse(config.ai_endpoint)
+
+    host = parsed.hostname
+    if not host:
+        raise AnalyzerError(
+            "1f", f"Invalid AI endpoint URL (no host): {config.ai_endpoint}"
+        )
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+    try:
+        with socket.create_connection(
+            (host, port), timeout=Config.LLM_ENDPOINT_CONNECT_TIMEOUT_SECONDS
+        ):
+            pass  # Connection succeeded — endpoint is reachable.
+    except (socket.gaierror, OSError) as exc:
+        raise AnalyzerError(
+            "1f",
+            f"AI endpoint unreachable: {config.ai_endpoint} "
+            f"(host={host}, port={port}) — {exc}",
+        ) from exc
+    print(f"[1f] Pre-flight check passed: {host}:{port} is reachable.")
+
+
 def call_llm(
     messages: list[AllMessageValues],
     config: EnvConfig,
     tools: list[ChatCompletionToolParam] | None = None,
     repo: git.Repo | None = None,
 ) -> tuple[str, list[AllMessageValues]]:
+
     """Call the configured LLM endpoint with the given conversation via litellm.
 
     If tools are provided, enables tool-use and handles tool calls in a loop.
@@ -637,9 +687,11 @@ def call_llm(
             "temperature": 0.2,
             "api_key": config.ai_key,
             "api_base": config.ai_endpoint,
-            "timeout": 300,
+            "timeout": Config.LLM_TIMEOUT_SECONDS,
+            "num_retries": Config.LLM_NUM_RETRIES,
             "drop_params": True,  # tolerate providers/models that reject params like `temperature`
         }
+
         if tools:
             kwargs["tools"] = tools
         completion = litellm.completion(**kwargs)
@@ -1060,9 +1112,22 @@ def main() -> int:
         print(f"ERROR during initialization: {exc.message}", file=sys.stderr)
         return 2
 
+    # Pre-flight check: verify the AI endpoint is reachable before doing
+    # any expensive work. A wrong endpoint previously caused litellm to
+    # retry for up to 20 minutes (3 retries × 300s timeout). This TCP
+    # connect check fails in ~10s instead.
+    try:
+        validate_llm_endpoint(config)
+    except AnalyzerError as exc:
+        _gh_annotation("error", exc.message, exc.step)
+        _write_step_summary("unknown")
+        print(f"ERROR during pre-flight check: {exc.message}", file=sys.stderr)
+        return 1
+
     prompt_template = config.action_path / "prompts" / "prompt_template.txt"
 
     # File-based (testing) mode: when ANALYZER_RESULT_FILE is set, load a
+
     # raw pprof profile from a local file and skip all SERVICE_URL
     # interactions (steps 1a trigger, 1b poll, 1k submit, and 2a error-flag).
     file_mode = bool(config.analyzer_result_file)
