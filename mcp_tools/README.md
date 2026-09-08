@@ -17,7 +17,7 @@ Unlike the GitHub Action (which makes external LLM API calls) or the Claude Code
 
 ### Prerequisites
 
-- Python 3.10+ (required by MCP v2.x)
+- Python 3.12+ (required by MCP v2.x)
 - `pprof-to-md` npm binary in PATH (for profile conversion)
 - `git` CLI available
 - Go toolchain (for `run_cpu_profile` tool only)

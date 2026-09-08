@@ -5,7 +5,7 @@ Complete installation instructions for the four Claude Code skills.
 ## Prerequisites
 
 - **Claude Code** (latest version)
-- **Python 3.11+** (for the skills)
+- **Python 3.12+** (for the skills)
 - **Git** (for repository operations)
 - **npm** (for `pprof-to-md` tool)
 - **Node.js 16+** (for npm)
@@ -204,7 +204,7 @@ Once installed, you can use the skills in Claude Code:
 
 ## System Requirements Detail
 
-### Python 3.11+
+### Python 3.12+
 
 Check version:
 ```bash

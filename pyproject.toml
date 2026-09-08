@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "pprof-analyzer"
 version = "0.1.0"
 description = "Analyzer for CPU profiles with LLM-powered optimization suggestions"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "mcp[cli]~=2.1.1",
     "GitPython~=3.1.59",

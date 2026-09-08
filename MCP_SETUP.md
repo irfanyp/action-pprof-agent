@@ -155,6 +155,6 @@ no project-specific steps beyond the standard `docker tag <image> <registry>/<na
 | Network | Local only | Local + remote |
 | Best for | Development | Teams, production |
 
-Docker defaults: port `8000` (override with `MCP_HTTP_PORT`), base image `python:3.10-slim`, non-root user `mcp` (UID 1000).
+Docker defaults: port `8000` (override with `MCP_HTTP_PORT`), base image `python:3.12-slim`, non-root user `mcp` (UID 1000).
 
 For architectural details, see [AGENTS.md](AGENTS.md).

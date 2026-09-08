@@ -183,7 +183,7 @@ The skill is designed to be minimal — discuss any major change before implemen
 
 **Can I use a different LLM?** Not with this skill; it's built for Claude Code. The GitHub Action supports OpenAI-compatible endpoints if you need that.
 
-**Does it work on Windows?** Yes, via WSL2 or Python 3.11+ with Git Bash (`SETUP.sh` is bash).
+**Does it work on Windows?** Yes, via WSL2 or Python 3.12+ with Git Bash (`SETUP.sh` is bash).
 
 ## Reporting issues
 

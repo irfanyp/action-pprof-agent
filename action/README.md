@@ -86,7 +86,7 @@ See [`pprof_integration.md`](pprof_integration.md) for a guide on integrating pp
 The composite action installs everything it needs:
 
 - **pprof-to-md** — Converts raw pprof profiles to markdown
-- **Python 3.11** — For the analyzer script
+- **Python 3.12** — For the analyzer script
 - **git** — For patch operations
 - **gh CLI** — For PR creation
 
