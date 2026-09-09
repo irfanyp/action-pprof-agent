@@ -1,6 +1,6 @@
 # Go Performance Optimization: Developer Guideline
 
-This guideline provides a comprehensive end-to-end framework to optimize your Go application's CPU and memory performance using LLM-powered analysis. Whether you choose a manual approach using any general LLM (ChatGPT, Claude, Gemini, DeepSeek, etc.) or run our integrated AI agent workflows (Claude Code, Cline, Gemini Code Assist, Codex, or GitHub Actions), this document outlines how to safely and empirically optimize your services.
+This guide covers optimizing your Go application's CPU performance with LLM-powered analysis — manually with any chat-based LLM, or through this repo's integrated agent workflows (Claude Code, MCP, GitHub Actions).
 
 ---
 
@@ -61,26 +61,20 @@ Raw `.prof` files are binary protocol buffers. LLMs cannot read them directly. Y
    This generates `cpu_profile_analysis.md`, which contains the detailed hot path functions and call trees alongside their exact line-level execution cost.
 
 ### Step 4: Prompt Your Preferred LLM (Direct-Edit Mode)
-Use an LLM agent with file access (Cline SR, Claude Code, Gemini Code Assist, Codex, etc.) together with the direct-edit prompt template in this project: [prompts/prompt_template_direct.txt](./prompts/prompt_template_direct.txt). The agent reads the profile, locates the relevant Go source files with its native tools, and applies fixes directly to your repository — no patch file is produced.
+Use an LLM agent with file access (Claude Code, Cline, Gemini Code Assist, Codex, etc.) with the direct-edit prompt template: [prompts/prompt_template_direct.txt](./prompts/prompt_template_direct.txt). The agent reads the profile, locates the relevant Go source with its native tools, and edits your repository directly — no patch file is produced.
 
-There are two ways to invoke the template:
+**Invoke it either by:**
+- Pasting the template's content into your prompt, then attaching/referencing `cpu_profile_analysis.md`.
+- Pointing the agent at the file by path in one message, e.g.:
+  ```
+  please execute this prompts/prompt_template_direct.txt where the reference_level is high and analyzer_result is @cpu_profile_analysis.md
+  ```
 
-**Scenario A — Copy-paste the template content:**
-1. Open your LLM agent of choice.
-2. Copy the content of the template into your prompt: [prompts/prompt_template_direct.txt](./prompts/prompt_template_direct.txt).
-3. Attach or reference the converted profile markdown (`cpu_profile_analysis.md`). If you don't, the agent will look for it in the common locations (`.ai_output/analyzer_result.md`, then `analyzer_result.md` in the repo root) and ask you if it cannot find it.
-4. Optionally specify the **reference level** (`low`, `med`, or `high`) — it defaults to `med` if unspecified.
+Both take two optional parameters: **reference level** (`low`/`med`/`high`, defaults to `med`) and **analyzer_result** (defaults to searching `.ai_output/analyzer_result.md`, then `analyzer_result.md` in the repo root, and asks you if neither is found).
 
-**Scenario B — Reference the template by path (no copy-paste):**
-Instead of pasting the template content, point the agent at the template file and pass your parameters in a single message:
-```
-please execute this prompts/prompt_template_direct.txt where the reference_level is high and analyzer_result is @cpu_profile_analysis.md
-```
-The agent reads the template itself, picks up `reference_level` and `analyzer_result` from your message, and proceeds exactly as in Scenario A. If you omit `reference_level`, it defaults to `med`; if you omit `analyzer_result`, the agent searches the common locations and asks you if it cannot find it.
+**The agent will:** classify each hotspot as application vs. non-application code (only application-code hotspots are fixable), inspect and edit the relevant files, then reply with a `### SUMMARY` — an Executive Summary Table (measured cost, Amdahl's-law upper bound, confidence, priority per hotspot) plus a root-cause note for each fix.
 
-**What the agent will do:** determine the reference level, classify each hotspot as application vs. non-application code (only application-code hotspots are fixable), use its native file-reading/search/editing tools to locate and inspect the relevant Go source files, apply fixes directly to the repository, and respond with a `### SUMMARY` section containing an **Executive Summary Table** (per-hotspot measured cost, Amdahl's-law upper bound, confidence, priority) plus a concise root-cause explanation of each fix.
-
-> **Note:** Chat-only web interfaces (e.g. ChatGPT or Claude.ai without file access) cannot use the direct-edit flow. In that case, paste the profile markdown and the relevant source files into the conversation and ask for a unified diff patch to apply manually.
+> Chat-only interfaces (e.g. ChatGPT or Claude.ai without file access) can't use this flow — paste the profile markdown and relevant source files into the conversation instead, and ask for a unified diff patch to apply manually.
 
 ### Step 5: Review the AI Code Changes
 Since the agent edits your source files directly (no patch file is generated), review and manage the changes with git:
@@ -221,7 +215,7 @@ jobs:
           tags: ${{ github.event.inputs.tags }}
           reference: ${{ github.event.inputs.reference }}
 ```
-**Expected Behavior:** This action will trigger a remote profiling service, fetch the raw profile, run the analysis, utilize a multi-turn agent loop to inspect your files, validate that code edits apply cleanly, and automatically commit and open a PR with the suggested optimizations.
+**Expected behavior:** triggers a remote profiling service, fetches and analyzes the profile, inspects your files via a multi-turn agent loop, validates the edits apply cleanly, then commits and opens a PR.
 
 ---
 
