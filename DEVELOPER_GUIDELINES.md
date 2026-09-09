@@ -23,12 +23,12 @@ Before you begin, ensure you have the following installed on your machine:
 
 1.  **Go** (1.20 or higher) — for compiling, running, and analyzing profiles.
 2.  **Node.js** (18 or higher) — required to run the `pprof-to-md` utility.
-3.  **Python** (3.10 or higher) — only required if using the automated local scripts/MCP server.
+3.  **Python** (3.12 or higher) — only required if using the automated local scripts/MCP server.
 
 ---
 
-## 🚀 Approach 1: Manual E2E Workflow (For ANY LLM)
-*Use this approach if you are prompting web interfaces like **ChatGPT, Claude.ai, Gemini Advanced, or Cline SR**.*
+## 🚀 Approach 1: Direct-Edit Mode (LLM Agents with File Access)
+*Use this approach if you are using **agent tools with native file editing** like Claude Code, Cline, Gemini Code Assist, Cursor, or Codex. For chat-only interfaces (ChatGPT, Claude.ai without file access), paste the profile and source files as text and ask for a patch.*
 
 ### Step 1: Integrate the `pprof` Endpoint
 Your Go application must expose Go's native profiling endpoint. 
@@ -119,7 +119,7 @@ Never trust an optimization blindly. You must empirically prove that the CPU usa
 ---
 
 ## 🤖 Approach 2: Guided & Automated Workflows
-*If you are using developer-focused AI tools (Claude Code, Codex, Gemini CLI, Cline), this repository provides native integration scripts to automate the manual loop.*
+*This repository ships three native integrations that automate the manual loop above: local Claude Code skills (Option A), an MCP server for any MCP-compatible agent host (Option B), and a GitHub Action for CI/CD (Option C). See [README.md](./README.md) for a full feature comparison.*
 
 ### Option A: Local Claude Code Skills
 If you run **Claude Code**, you can leverage the pre-packaged skills in the `skill/` folder to automate integration, load generation, profiling, and patching.
@@ -151,20 +151,25 @@ This registers four commands directly inside your local Claude Code CLI.
 ---
 
 ### Option B: Model Context Protocol (MCP) Server
-If you use agent hosts like **Codex, Cline SR, or Claude Desktop**, you can expose these profiling and analysis capabilities as MCP Tools.
+If you use agent hosts like **Claude Code, Claude Desktop, Cursor, Cline, or Codex**, you can expose these profiling and analysis capabilities as MCP Tools.
 
 #### 1. Local Stdio Transport (Single User)
 Start the MCP server using Python:
 ```bash
 python3 mcp_server.py
 ```
-Add the following block to your Claude Desktop config (`~/.claude_desktop/claude_desktop_config.json`):
+**Claude Code** can register it directly:
+```bash
+claude mcp add --transport stdio pprof-analyzer --scope project -- \
+  python3 $(pwd)/mcp_server.py
+```
+**Claude Desktop / Cursor** (`claude_desktop_config.json`) or **Cline** (`.cline_mcp_settings.json`) — add the following block:
 ```json
 {
   "mcpServers": {
     "pprof-analyzer": {
       "command": "python3",
-      "args": ["/absolute/path/to/action-pprof-agent/mcp_server.py"]
+      "args": ["/absolute/path/to/pprof-analyzer/mcp_server.py"]
     }
   }
 }
@@ -207,12 +212,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Auto-Optimize and Open Pull Request
-        uses: irfanyp/action-pprof-agent@master
+        uses: <this-repo>@<version>  # e.g. your-org/pprof-analyzer@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           ai_endpoint: ${{ secrets.AI_ENDPOINT }}
           ai_key: ${{ secrets.AI_KEY }}
-          ai_model: 'anthropic/claude-3-5-sonnet-20241022'
+          ai_model: 'anthropic/claude-3-5-sonnet-20241022'  # or a self-hosted model name, e.g. 'gamma4'
           tags: ${{ github.event.inputs.tags }}
           reference: ${{ github.event.inputs.reference }}
 ```
