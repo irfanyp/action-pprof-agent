@@ -19,13 +19,13 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.12'
           cache: 'pip'
 
       - name: Install dependencies
         run: |
           pip install --no-cache-dir -r action/scripts/requirements-dev.txt
-          pip install --no-cache-dir -r mcp_tools/requirements.txt pytest pytest-mock pytest-asyncio
+          pip install --no-cache-dir -r mcp_tools/requirements.txt
 
       - name: Run tests
         run: |
