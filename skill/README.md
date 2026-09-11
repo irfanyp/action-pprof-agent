@@ -48,9 +48,7 @@ cd pprof-analyzer-skill/
 
 **From this source repository:**
 ```bash
-skill/build-zip.sh
-unzip skill/pprof-analyzer-skill.zip
-cd pprof-analyzer-skill/ && ./SETUP.sh install
+make install-claude-skill
 ```
 
 The ZIP extracts into a single flat `pprof-analyzer-skill/` directory:
@@ -151,7 +149,7 @@ curl http://localhost:9987/debug/pprof/goroutine > goroutines.prof     # gorouti
 
 ## Troubleshooting
 
-- **"pprof-to-md not found"** — `npm install -g pprof-to-md`
+- **"pprof-to-md not found"** — `make install-pprof-to-md`
 - **Patch doesn't apply cleanly** — inspect `.ai_output/prompt.txt` to see exactly what Claude received, then retry with a different `reference_level` (e.g. `low` for a smaller, safer patch)
 - More detail: [INSTALL.md](INSTALL.md)
 
@@ -159,12 +157,12 @@ curl http://localhost:9987/debug/pprof/goroutine > goroutines.prof     # gorouti
 
 ```bash
 pytest skill/pprof_analyzer/tests/   # one skill's tests
-pytest skill/*/tests/                # all skill tests
+make test-skill                      # all skill tests
 ```
 
 - **Prompt**: edit [prompts/prompt_template.txt](../prompts/prompt_template.txt) (shared with the Action and MCP server — see [AGENTS.md](../AGENTS.md) for the sync rules) — key placeholders are `{reference_level}`, `{analyzer_result}`, `{file_list}`.
 - **File listing**: `gather_local_context()` in `skill/pprof_analyzer/analyzer.py`.
-- **Rebuild the distributed ZIP** after any change under `skill/` or to `action/pprof_integration.md`: `skill/build-zip.sh`.
+- **Rebuild the distributed ZIP** after any change under `skill/` or to `action/pprof_integration.md`: `make build-claude-skill`.
 
 The skill is designed to be minimal — discuss any major change before implementing (see [AGENTS.md](../AGENTS.md)).
 

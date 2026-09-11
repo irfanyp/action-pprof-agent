@@ -47,7 +47,7 @@ LLMs can't read binary `.prof` files. Convert to markdown:
 
 1. **Install globally:**
    ```bash
-   npm install -g pprof-to-md
+   make install-pprof-to-md
    ```
 2. **Convert:**
    ```bash
@@ -115,9 +115,7 @@ Use the pre-packaged skills in `skill/` to automate integration, load generation
 
 #### 1. Installation
 ```bash
-cd skill/
-chmod +x SETUP.sh
-./SETUP.sh install
+make install-claude-skill
 ```
 This registers four commands in your local Claude Code CLI.
 
@@ -143,7 +141,7 @@ Expose profiling and analysis capabilities as MCP Tools for agent hosts like **C
 
 #### 1. Local Stdio Transport (Single User)
 ```bash
-python3 mcp_server.py
+make mcp-stdio-run
 ```
 **Claude Code** registration:
 ```bash

@@ -70,7 +70,7 @@ Analyze Go pprof profiles and generate performance optimization patches using LL
 
 **Option A: Stdio** (Single user, local)
 ```bash
-python3 mcp_server.py
+make mcp-stdio-run
 claude mcp add --transport stdio pprof-analyzer --scope project -- \
   python3 $(pwd)/mcp_server.py
 ```

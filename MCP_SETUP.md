@@ -3,9 +3,9 @@
 Two transport options: **stdio** for local/single-user use, **HTTP/SSE** for team access over a network.
 
 ```bash
-python3 mcp_server.py                              # stdio, local only
+make mcp-stdio-run                                  # stdio, local only
 python3 mcp_server_http.py                          # HTTP/SSE on localhost:8000
-python3 mcp_server_http.py --host 0.0.0.0 --port 9000   # network-accessible, custom port
+make mcp-http-run                                   # network-accessible, custom port (0.0.0.0:9000)
 ```
 
 HTTP/SSE endpoints: MCP at `/sse`, health at `/health`, docs at `/docs`.
@@ -99,9 +99,9 @@ curl http://localhost:8000/docs     # API docs
 ## Docker Deployment
 
 ```bash
-docker build -t pprof-analyzer-mcp .
-docker run -p 8000:8000 pprof-analyzer-mcp                        # local dev
-docker run -d --network host --name mcp-server pprof-analyzer-mcp --port 8000   # hosted VM, no NAT overhead
+make mcp-http-docker-build
+make mcp-http-docker-run                            # local dev, -p 8000:8000
+make mcp-http-docker-run NETWORK=host               # hosted VM, no NAT overhead
 ```
 
 **Custom port:** the image's `HEALTHCHECK` probes `$MCP_HTTP_PORT` (default `8000`).
@@ -141,7 +141,7 @@ no project-specific steps beyond the standard `docker tag <image> <registry>/<na
 | Port already in use | `lsof -i :8000`, or run with `--port 9000` |
 | Connection refused from another machine | Bind with `--host 0.0.0.0` |
 | Container `unhealthy` despite working server | Custom `--port` needs matching `-e MCP_HTTP_PORT=<port>` |
-| Import errors | `pip install -e .` |
+| Import errors | `make setup-env` |
 | Container exits immediately | `docker logs <container-id>`, or `docker run -it pprof-analyzer-mcp /bin/bash` to debug |
 
 ---

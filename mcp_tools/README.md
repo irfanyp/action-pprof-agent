@@ -25,12 +25,7 @@ Unlike the GitHub Action (which makes external LLM API calls) or the Claude Code
 ### Setup
 
 ```bash
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-
-# Install dependencies
-pip install -r mcp_tools/requirements.txt
+make setup-env
 ```
 
 ## Testing Locally
@@ -38,7 +33,7 @@ pip install -r mcp_tools/requirements.txt
 Run the test suite:
 
 ```bash
-pytest mcp_tools/tests/ -v
+make test-mcp
 ```
 
 Launch MCP Inspector for manual testing:
@@ -145,7 +140,7 @@ Profiles are written to `.ai_output/cpu.prof` relative to the repo path, not the
 ### Running Tests
 
 ```bash
-pytest mcp_tools/tests/ -v
+make test-mcp
 ```
 
 All tests are mocked (no real skill scripts are called).

@@ -8,7 +8,7 @@ Guidance for AI agents working in this repository.
 
 1. **GitHub Action** (`action/scripts/analyzer.py`) — triggers/loads a pprof profile, converts it to markdown via `pprof-to-md`, sends it + a repo file list to an external OpenAI-compatible LLM with tool-use enabled (LLM calls a `read_file` tool in a loop to request files/lines), extracts a unified-diff patch, applies it, and opens a PR via `gh`.
 2. **Claude Code Skill** (`skill/pprof_analyzer/`) — same idea, run locally, single-turn: converts the profile, lists Go files (no source read yet), builds one prompt, and returns it for Claude Code to analyze with its own native `Read` tool instead of a custom loop. No external API calls, no PR creation — writes `SUMMARY`/`PATCH` artifacts to `.ai_output/` for the user to apply.
-3. **MCP Server** (`mcp_tools/`) — wraps all four skills (unmodified) as MCP tools (`analyze_pprof_profile`, `integrate_pprof_endpoint`, `generate_load_test`, `run_cpu_profile`) over stdio (or HTTP/SSE), so any MCP-compatible host can call them. Has a per-repo concurrency guard for `run_cpu_profile`.
+3. **MCP Server** (`mcp_tools/`) — wraps all four skills (unmodified) as five MCP tools (`analyze_pprof_profile_tool`, `build_pprof_analysis_prompt_tool`, `integrate_pprof_endpoint_tool`, `generate_load_test_tool`, `run_cpu_profile_tool`) over stdio (or HTTP/SSE), so any MCP-compatible host can call them. Has a per-repo concurrency guard for `run_cpu_profile_tool`.
 
 See [README.md](README.md) for a feature comparison, [mcp_tools/README.md](mcp_tools/README.md) and [MCP_SETUP.md](MCP_SETUP.md) for MCP setup.
 
@@ -79,7 +79,7 @@ Any markdown you generate (analysis, summaries, plans, review notes) goes in `.a
 
 ## Common workflows
 
-- **Feature**: write/extend a test first, reuse existing patterns, run `make test`, check `examples/workflow.yml` still works.
+- **Feature**: write/extend a test first, reuse existing patterns, run `make test`, check `action/examples/workflow.yml` still works.
 - **Bug fix**: find root cause, minimal targeted fix, add a regression test, explain the "why" in the commit message.
 - **Refactor**: behavior must be identical before/after (`make test` both times); one refactor per PR; update this file if patterns change.
 - **Prompt change**: edit [prompts/prompt_template.txt](prompts/prompt_template.txt) only, test against a real profile, confirm the response still parses and `git apply`s cleanly.
