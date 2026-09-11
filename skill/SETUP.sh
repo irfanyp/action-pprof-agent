@@ -168,8 +168,14 @@ uninstall_skills() {
         rm -rf "$SKILLS_INSTALL_DIR/$skill"
     done
 
-    # Remove shared prompt files installed alongside the skills
-    rm -rf "$PROMPTS_INSTALL_DIR"
+    # Remove only the prompt files we installed, not the entire directory —
+    # the user (or another tool) may have placed other files in $PROMPTS_INSTALL_DIR.
+    if [ -d "$SCRIPT_DIR/prompts" ]; then
+        for prompt_file in "$SCRIPT_DIR"/prompts/*; do
+            rm -f "$PROMPTS_INSTALL_DIR/$(basename "$prompt_file")"
+        done
+    fi
+    rmdir "$PROMPTS_INSTALL_DIR" 2>/dev/null || true
 
     log_info "✓ Skills uninstalled from $SKILLS_INSTALL_DIR"
     return 0

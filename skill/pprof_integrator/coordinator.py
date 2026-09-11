@@ -44,8 +44,9 @@ def run_integrator(repo_path: str | Path) -> str:
         if not (repo_path / "go.mod").exists():
             raise ValueError(f"Not a Go module (no go.mod found): {repo_path}")
 
-    # The guide is shared across Action/Skill/MCP, not part of this skill —
-    # resolve it relative to this file's location instead of repo_path.
+    # The guide is shared across Action/Skill/MCP and lives in the shared
+    # prompts/ directory (two levels up from this skill), not alongside
+    # coordinator.py as it did before the consolidation.
     guide_path = Path(__file__).resolve().parents[2] / "prompts" / "pprof_integration.md"
 
     if not guide_path.exists():
