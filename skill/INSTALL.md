@@ -75,7 +75,11 @@ mkdir -p ~/.claude/skills
 # Copy skill definitions and implementations
 cp *.md ~/.claude/skills/
 cp -r pprof-analyzer/ pprof-integrator/ load-test-generator/ profiler-executor/ ~/.claude/skills/
-cp pprof_integration.md ~/.claude/skills/pprof-integrator/
+
+# Copy shared prompt files (prompt_template.txt, pprof_integration.md, ...) —
+# pprof-analyzer/pprof-integrator read these relative to ~/.claude/skills/<skill>/
+mkdir -p ~/.claude/prompts
+cp -r prompts/. ~/.claude/prompts/
 
 # Verify files are in place
 ls ~/.claude/skills/
@@ -109,6 +113,9 @@ pprof-to-md --version
 
 # Check skill files
 ls ~/.claude/skills/*.md
+
+# Check shared prompt files
+ls ~/.claude/prompts/
 ```
 
 ## Troubleshooting

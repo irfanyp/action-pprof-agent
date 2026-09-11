@@ -79,4 +79,4 @@ Best for teams sharing analysis tools across multiple AI agents.
 - **[MCP_SETUP.md](MCP_SETUP.md)** — MCP server setup, Docker, and production deployment
 - **[AGENTS.md](AGENTS.md)** — Developer reference: flow documentation, conventions, and contribution guidelines for all implementations
 - **[skill/README.md](skill/README.md)** — Claude Code skill usage, design, and distribution
-- **[action/pprof_integration.md](action/pprof_integration.md)** — How to add pprof to your Go service
+- **[prompts/pprof_integration.md](prompts/pprof_integration.md)** — How to add pprof to your Go service

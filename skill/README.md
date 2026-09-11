@@ -56,7 +56,8 @@ The ZIP extracts into a single flat `pprof-analyzer-skill/` directory:
 pprof-analyzer-skill/
 ├── SETUP.sh                  # install / verify / uninstall
 ├── README.md, INSTALL.md     # docs
-├── pprof-analyzer/           # analyzer.py, prompts/, requirements.txt, SKILL.md, tests/
+├── prompts/                  # prompt_template.txt, pprof_integration.md — shared, installed to ~/.claude/prompts/
+├── pprof-analyzer/           # analyzer.py, requirements.txt, SKILL.md, tests/
 ├── pprof-integrator/
 ├── load-test-generator/
 └── profiler-executor/
@@ -117,7 +118,7 @@ git commit -m "perf: optimize hotspots per pprof analysis"
 
 ## Supporting Skills
 
-**pprof-integrator** — adds `net/http/pprof` per the [action/pprof_integration.md](../action/pprof_integration.md) guide, detecting your framework (gin, echo, fiber, chi, net/http, …) and generating a dedicated pprof server on port 9987.
+**pprof-integrator** — adds `net/http/pprof` per the [prompts/pprof_integration.md](../prompts/pprof_integration.md) guide, detecting your framework (gin, echo, fiber, chi, net/http, …) and generating a dedicated pprof server on port 9987.
 ```bash
 /pprof-integrator ./my-service
 ```
@@ -156,7 +157,7 @@ make test-skill                      # all skill tests
 
 - **Prompt**: edit [prompts/prompt_template.txt](../prompts/prompt_template.txt) (shared with the Action and MCP server — see [AGENTS.md](../AGENTS.md) for the sync rules) — key placeholders are `{reference_level}`, `{analyzer_result}`, `{file_list}`.
 - **File listing**: `gather_local_context()` in `skill/pprof_analyzer/analyzer.py`.
-- **Rebuild the distributed ZIP** after any change under `skill/` or to `action/pprof_integration.md`: `make build-claude-skill`.
+- **Rebuild the distributed ZIP** after any change under `skill/` or to `prompts/pprof_integration.md`: `make build-claude-skill`.
 
 The skill is designed to be minimal — discuss any major change before implementing (see [AGENTS.md](../AGENTS.md)).
 
@@ -187,6 +188,6 @@ Same as the pprof-analyzer action.
 
 ## See Also
 
-- [action/pprof_integration.md](../action/pprof_integration.md) — how to add pprof endpoints to a Go service
+- [prompts/pprof_integration.md](../prompts/pprof_integration.md) — how to add pprof endpoints to a Go service
 - [INSTALL.md](INSTALL.md) — detailed installation guide
 - [AGENTS.md](../AGENTS.md) — architecture and sync rules across Action/Skill/MCP implementations

@@ -79,7 +79,7 @@ To target a native provider API instead, prefix `AI_MODEL` with the matching lit
 
 For testing, you can bypass the SERVICE_URL analyzer service and supply a raw pprof profile directly using the `analyzer_result_file` input.
 
-See [`pprof_integration.md`](pprof_integration.md) for a guide on integrating pprof into your Go services.
+See [`pprof_integration.md`](../prompts/pprof_integration.md) for a guide on integrating pprof into your Go services.
 
 ## Prerequisites
 

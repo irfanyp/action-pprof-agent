@@ -44,8 +44,9 @@ def run_integrator(repo_path: str | Path) -> str:
         if not (repo_path / "go.mod").exists():
             raise ValueError(f"Not a Go module (no go.mod found): {repo_path}")
 
-    # Read the pprof integration guide
-    guide_path = Path(__file__).parent / "pprof_integration.md"
+    # The guide is shared across Action/Skill/MCP, not part of this skill —
+    # resolve it relative to this file's location instead of repo_path.
+    guide_path = Path(__file__).resolve().parents[2] / "prompts" / "pprof_integration.md"
 
     if not guide_path.exists():
         raise FileNotFoundError(f"pprof_integration.md not found at {guide_path}")

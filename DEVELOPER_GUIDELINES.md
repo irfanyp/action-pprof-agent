@@ -28,7 +28,7 @@ Optimize your Go application's CPU performance with LLM-powered analysis — man
 *For agents with native file editing (Claude Code, Cline, Gemini Code Assist, Cursor, Codex). For chat-only interfaces (ChatGPT, Claude.ai), paste the profile and source files as text and request a patch.*
 
 ### Step 1: Integrate the `pprof` Endpoint
-1. Follow the [pprof Integration Guide](./action/pprof_integration.md) for your router or framework (Gin, Echo, Fiber, Chi, or standard `net/http`).
+1. Follow the [pprof Integration Guide](./prompts/pprof_integration.md) for your router or framework (Gin, Echo, Fiber, Chi, or standard `net/http`).
 2. Verify the server launches. Standard Go HTTP exposes pprof on `/debug/pprof/` by default.
 
 ### Step 2: Deploy & Collect a CPU Profile
