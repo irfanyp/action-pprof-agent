@@ -49,6 +49,15 @@ endif
 build-claude-skill: ## Build the distributable Claude skill zip
 	skill/build-zip.sh
 
+.PHONY: release-tag
+release-tag: ## Bump the project version everywhere (usage: make release-tag <version>)
+	@VERSION="$(filter-out $@,$(MAKECMDGOALS))"; \
+	if [ -z "$$VERSION" ]; then \
+		echo "Usage: make release-tag <version>  (e.g. make release-tag 0.1.1)"; \
+		exit 1; \
+	fi; \
+	$(PYTHON) scripts/bump_version.py "$$VERSION"
+
 SKILL_INSTALL_DIR := /tmp/pprof-analyzer-skill-install
 
 .PHONY: extract-claude-skill
@@ -101,3 +110,9 @@ clean: ## Remove build artifacts and caches
 	find . -type d -name '__pycache__' -not -path './.venv/*' -not -path './node_modules/*' -exec rm -rf {} +
 	rm -rf .pytest_cache
 	find .ai_output -mindepth 1 -not -name '.gitkeep' -exec rm -rf {} +
+
+# Swallow the version argument as a no-op target so `make release-tag 0.1.1`
+# doesn't fail with "No rule to make target '0.1.1'". Must stay the LAST rule
+# in the file so it never shadows a real target.
+%:
+	@:

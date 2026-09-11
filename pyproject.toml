@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pprof-analyzer"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Analyzer for CPU profiles with LLM-powered optimization suggestions"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,6 +13,9 @@ dependencies = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.23",
 ]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -34,4 +37,4 @@ pythonPath = "."
 extraPaths = ["action/scripts"]
 venvPath = "."
 venv = ".venv"
-exclude = ["**/node_modules", "**/__pycache__", "**/.*", "skill/pprof-analyzer-skill"]
+exclude = ["**/node_modules", "**/__pycache__", "**/.*", ".venv", "skill/pprof-analyzer-skill"]
