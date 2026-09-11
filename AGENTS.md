@@ -69,9 +69,9 @@ Any markdown you generate (analysis, summaries, plans, review notes) goes in `.a
 
 ## Development conventions
 
-- **Python environment**: always run Python via the repo's `.venv` (see [Makefile](Makefile)), never the system interpreter.
-  - No `.venv/` yet? Run `make setup-env` (creates it with `python3 -m venv .venv` and installs all requirements). If that fails or `python3 --version` isn't the pinned version (currently 3.12, see the Python-version sync row above), tell the user to install Python 3.12 (e.g. `pyenv install 3.12`, or their OS package manager) before re-running `make setup-env`.
-  - Prefer the `make` targets (`make test`, `make test-action`, `make lint`, `make check`, …) — they already invoke `.venv/bin/python`. Only fall back to `.venv/bin/python`/`.venv/bin/pytest` directly when no target fits, and never call bare `python`/`pytest`.
+- **Python environment**: always go through the repo's `.venv` (see [Makefile](Makefile)) — never the system interpreter, never bare `python`/`pytest`.
+  - No `.venv/` yet, or `python3 --version` isn't 3.12 (see the Python-version sync row above)? Install Python 3.12 (`pyenv install 3.12` or your OS package manager), then run `make setup-env`.
+  - Prefer `make` targets (`test`, `test-action`, `lint`, `check`, …) — they already invoke `.venv/bin/python`. Fall back to `.venv/bin/python`/`.venv/bin/pytest` directly only when no target fits.
 - Python deps: `action/scripts/requirements.txt` (runtime), `requirements-dev.txt` (dev) — installed via `make setup-env`. Tests: `make test` from repo root (or `make test-action`/`make test-mcp`/`make test-skill`/`make test-coverage`).
 - Node: `pprof-to-md` pinned in `action/package.json`; use `make npm-install-action` (runs `cd action && npm ci`).
 - Style: match the file you're editing — `from __future__ import annotations`, type hints, docstrings.

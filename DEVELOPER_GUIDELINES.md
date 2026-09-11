@@ -4,7 +4,7 @@ Optimize your Go application's CPU performance with LLM-powered analysis — man
 
 ---
 
-## 🗺️ The Core Optimization Loop
+## The Core Optimization Loop
 
 ```
 [Expose pprof Endpoint] ──> [Deploy & Stress Test] ──> [Capture cpu.prof]
@@ -15,7 +15,7 @@ Optimize your Go application's CPU performance with LLM-powered analysis — man
 
 ---
 
-## 📋 Prerequisites
+## Prerequisites
 
 1. **Go** (1.20+) — compile, run, and analyze profiles.
 2. **Node.js** (18+) — run the `pprof-to-md` utility.
@@ -23,9 +23,9 @@ Optimize your Go application's CPU performance with LLM-powered analysis — man
 
 ---
 
-## 🚀 Approach 1: Direct-Edit Mode (LLM Agents with File Access)
+## Approach 1: Direct-Edit Mode (LLM Agents with File Access)
 
-*Use this with agent tools that have native file editing (Claude Code, Cline, Gemini Code Assist, Cursor, Codex). For chat-only interfaces (ChatGPT, Claude.ai), paste the profile and source files as text and request a patch.*
+*For agents with native file editing (Claude Code, Cline, Gemini Code Assist, Cursor, Codex). For chat-only interfaces (ChatGPT, Claude.ai), paste the profile and source files as text and request a patch.*
 
 ### Step 1: Integrate the `pprof` Endpoint
 1. Follow the [pprof Integration Guide](./action/pprof_integration.md) for your router or framework (Gin, Echo, Fiber, Chi, or standard `net/http`).
@@ -40,7 +40,7 @@ Capture a profile under **realistic load** — an idle server produces nothing u
    ```bash
    curl -o cpu.prof "http://localhost:8080/debug/pprof/profile?seconds=30"
    ```
-   *(Replace `localhost:8080` with your service's address and port.)*
+   *(Replace `localhost:8080` with your service's address/port.)*
 
 ### Step 3: Convert the Profile via `pprof-to-md`
 LLMs can't read binary `.prof` files. Convert to markdown:
@@ -56,9 +56,9 @@ LLMs can't read binary `.prof` files. Convert to markdown:
    This produces `cpu_profile_analysis.md` with hot path functions, call trees, and line-level execution costs.
 
 ### Step 4: Prompt Your LLM (Direct-Edit Mode)
-Use an LLM agent with file access and the direct-edit prompt template: [prompts/prompt_template_direct.txt](./prompts/prompt_template_direct.txt). The agent reads the profile, locates relevant Go source with its native tools, and edits your repo directly — no patch file is produced.
+Use an LLM agent with file access and the direct-edit prompt template: [prompts/prompt_template_direct.txt](./prompts/prompt_template_direct.txt). It reads the profile, locates relevant Go source with its native tools, and edits your repo directly — no patch file is produced.
 
-**Invoke it by:**
+**Invoke by:**
 - Pasting the template content into your prompt, then attaching/referencing `cpu_profile_analysis.md`.
 - Pointing the agent at the file in one message:
   ```
@@ -67,7 +67,7 @@ Use an LLM agent with file access and the direct-edit prompt template: [prompts/
 
 Both accept optional parameters: **reference level** (`low`/`med`/`high`, default `med`) and **analyzer_result** (default: searches `.ai_output/analyzer_result.md`, then `analyzer_result.md` in repo root, asks if neither found).
 
-**The agent will:** classify each hotspot as application vs. non-application code (only application-code hotspots are fixable), inspect and edit relevant files, then reply with a `### SUMMARY` — an Executive Summary Table (measured cost, Amdahl's-law upper bound, confidence, priority per hotspot) plus a root-cause note for each fix.
+**The agent then:** classifies each hotspot as application vs. non-application code (only application-code hotspots are fixable), inspects and edits relevant files, and replies with a `### SUMMARY` — an Executive Summary Table (measured cost, Amdahl's-law upper bound, confidence, priority per hotspot) plus a root-cause note per fix.
 
 > Chat-only interfaces (ChatGPT, Claude.ai without file access): paste the profile markdown and relevant source files, then request a unified diff patch to apply manually.
 
@@ -84,7 +84,7 @@ Go is sensitive to formatting — verify before committing:
 ```bash
 gofmt -l .
 ```
-*(Any file listed needs `gofmt -w <file>`.)*
+*(Any listed file needs `gofmt -w <file>`.)*
 
 ### Step 6: Validate & Verify the Improvements
 Empirically prove that CPU usage decreased.
@@ -99,16 +99,16 @@ Empirically prove that CPU usage decreased.
    ```bash
    go tool pprof -diff_base cpu.prof -http=0.0.0.0:8081 cpu_optimized.prof
    ```
-5. Open `http://localhost:8081` in your browser. Color coding:
+5. Open `http://localhost:8081` in your browser:
    * **Red nodes**: regressions (CPU increased).
    * **Blue nodes**: improvements (CPU decreased).
    * **Node sizes**: absolute savings. Target hotspots should be solid blue.
 
 ---
 
-## 🤖 Approach 2: Guided & Automated Workflows
+## Approach 2: Guided & Automated Workflows
 
-*Three native integrations automate the manual loop: local Claude Code skills (Option A), an MCP server for any MCP-compatible host (Option B), and a GitHub Action for CI/CD (Option C). See [README.md](./README.md) for a feature comparison.*
+*Three integrations automate the manual loop: local Claude Code skills (Option A), an MCP server for any MCP-compatible host (Option B), and a GitHub Action for CI/CD (Option C). See [README.md](./README.md) for a feature comparison.*
 
 ### Option A: Local Claude Code Skills
 Use the pre-packaged skills in `skill/` to automate integration, load generation, profiling, and patching.
@@ -208,7 +208,7 @@ jobs:
 
 ---
 
-## 💡 Pro-Tips for Optimization
+## Pro-Tips for Optimization
 
 1. **Reference Levels Matter:**
    * `low`: Safe micro-optimizations (pre-allocating slice capacity, avoiding runtime type casting).

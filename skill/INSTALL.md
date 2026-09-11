@@ -19,7 +19,7 @@ unzip pprof-analyzer-skill.zip
 cd pprof-analyzer-skill/
 ```
 
-This creates a single `pprof-analyzer-skill/` directory containing all files:
+This creates a single `pprof-analyzer-skill/` directory:
 
 ```bash
 ls
@@ -56,7 +56,7 @@ You should see:
 
 ## Manual Installation
 
-If you prefer to install manually:
+To run each step by hand instead of using `SETUP.sh`:
 
 ### 1. Extract the ZIP
 
@@ -269,13 +269,3 @@ For issues or questions:
 1. Check [README.md](README.md) for usage, design, and distribution details
 2. Check logs: `./SETUP.sh verify` shows detailed diagnostics
 
-## Next Steps
-
-1. ✅ Install with `./SETUP.sh install`
-2. ✅ Verify with `./SETUP.sh verify`
-3. ✅ Read [README.md](README.md) for usage
-4. ✅ Start using skills in Claude Code!
-
----
-
-**Installation complete! Happy optimizing! 🚀**

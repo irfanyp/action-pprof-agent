@@ -1,6 +1,6 @@
 # pprof-analyzer Claude Skill
 
-Analyze Go pprof profiles and generate performance optimization patches in Claude Code — no API keys, no external LLM calls, no agent-loop code to maintain. This is the standalone Claude Code skill form of the [pprof-analyzer GitHub Action](https://github.com/irfanyusupramono/pprof-analyzer); it runs entirely locally.
+Analyze Go pprof profiles and generate performance optimization patches in Claude Code — no API keys, no external LLM calls, no agent-loop code to maintain. It's the standalone, fully-local Claude Code skill form of the [pprof-analyzer GitHub Action](https://github.com/irfanyusupramono/pprof-analyzer).
 
 > **Source repo vs. distributed ZIP:** in this repository, skill directories use underscores (`skill/pprof_analyzer/`, `skill/load_test_generator/`, …) so they can be imported as Python modules by the MCP server. The distributed ZIP renames them to hyphens (`pprof-analyzer/`, …) and installs them to `~/.claude/skills/`, for backward compatibility with the original distribution format.
 
@@ -65,13 +65,9 @@ See [INSTALL.md](INSTALL.md) for manual installation and detailed prerequisites.
 
 ## How It Works
 
-The GitHub Action drives a **custom multi-turn agent loop against an external LLM API**: it sends the profile plus a bare file list, the LLM calls a `read_file` tool, the Action's Python code intercepts that call and returns the file, and this repeats (up to ~10 times) until the LLM returns a patch.
+The GitHub Action runs a **custom multi-turn agent loop against an external LLM API**: it sends the profile plus a bare file list, the LLM calls a `read_file` tool, the Action's Python code intercepts that call and returns the file, and this repeats (up to ~10 times) until the LLM returns a patch.
 
-This skill relies on **Claude Code's own agentic capabilities** instead:
-1. Convert the pprof profile to markdown (`pprof-to-md`) and list the repo's Go files (`git ls-files`) — no source content is read at this stage.
-2. Hand both to Claude in a single prompt.
-3. Claude — already running inside Claude Code, with its own native `Read` tool — pulls whichever files it needs directly from the local repo. No custom tool-call interception, no external API client.
-4. Claude returns `### SUMMARY` + `### PATCH`; the skill validates the patch with `git apply --check` and writes artifacts.
+This skill uses **Claude Code's own agentic capabilities** instead: convert the profile to markdown (`pprof-to-md`) and list the repo's Go files (`git ls-files`) — no source is read yet — then hand both to Claude in one prompt. Claude, already running inside Claude Code with its own native `Read` tool, pulls whichever files it needs directly from the repo — no tool-call interception, no external API client. It returns `### SUMMARY` + `### PATCH`; the skill validates the patch with `git apply --check` and writes artifacts.
 
 |  | GitHub Action | Skill |
 |---|---|---|
@@ -80,8 +76,6 @@ This skill relies on **Claude Code's own agentic capabilities** instead:
 | API keys | Required | None |
 | Speed | 2-5 min | 15-35 sec |
 | Output | Opens a PR | Artifacts in `.ai_output/` (user applies/commits) |
-
-This means no external API calls, no credentials to manage, and no fixed cap on what Claude can inspect — it reads exactly what it asks for.
 
 ## Usage
 
@@ -123,17 +117,17 @@ git commit -m "perf: optimize hotspots per pprof analysis"
 
 ## Supporting Skills
 
-**pprof-integrator** — integrates `net/http/pprof` using the [action/pprof_integration.md](../action/pprof_integration.md) guide. Detects your framework (gin, echo, fiber, chi, net/http, …) and generates a dedicated pprof server on port 9987.
+**pprof-integrator** — adds `net/http/pprof` per the [action/pprof_integration.md](../action/pprof_integration.md) guide, detecting your framework (gin, echo, fiber, chi, net/http, …) and generating a dedicated pprof server on port 9987.
 ```bash
 /pprof-integrator ./my-service
 ```
 
-**load-test-generator** — analyzes your service's HTTP endpoints and request patterns, then generates a load test script (k6, Apache Bench, wrk, or custom Go) to drive traffic during profiling.
+**load-test-generator** — inspects your service's HTTP endpoints and generates a load test script (k6, Apache Bench, wrk, or custom Go) to drive traffic during profiling.
 ```bash
 /load-test-generator ./my-service --tool k6
 ```
 
-**profiler-executor** — builds and starts your service, runs `go tool pprof .../profile?seconds=30` and your load test in parallel, captures `cpu.prof` to `.ai_output/`, then stops the service.
+**profiler-executor** — builds and starts your service, runs `go tool pprof .../profile?seconds=30` alongside your load test, captures `cpu.prof` to `.ai_output/`, then stops the service.
 ```bash
 /profiler-executor ./my-service --load-cmd "k6 run load_test.js" --duration 30
 ```

@@ -90,12 +90,6 @@ The composite action installs everything it needs:
 - **git** — For patch operations
 - **gh CLI** — For PR creation
 
-## Quick Navigation
+## See Also
 
-- 📖 **Full Documentation** → See the main [`README.md`](../README.md)
-- 🧠 **Developer Guide** → See [`AGENTS.md`](../AGENTS.md)
-- 🚀 **Want a Local Skill Instead?** → See [`skill/README.md`](../skill/README.md)
-
----
-
-**For detailed architecture and development guidance, see [AGENTS.md](../AGENTS.md).**
+[`README.md`](../README.md) (project overview) · [`AGENTS.md`](../AGENTS.md) (developer/architecture guide) · [`skill/README.md`](../skill/README.md) (local skill alternative)

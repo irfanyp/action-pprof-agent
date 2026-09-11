@@ -1,17 +1,12 @@
 # MCP Server: pprof-analyzer
 
-An MCP (Model Context Protocol) server that exposes the four pprof-analyzer skills as tools, making them available to Claude Code, Claude Desktop, Cline, Cursor, and other MCP-native AI agents.
+An MCP (Model Context Protocol) server exposing the four pprof-analyzer skills as tools for Claude Code, Claude Desktop, Cline, Cursor, and other MCP-native AI agents.
 
 ## What is this?
 
-This MCP server wraps the four existing skills (`skill/`) without modification, exposing them as MCP tools:
+This server wraps the four existing skills (`skill/`) as MCP tools — `analyze_pprof_profile`, `integrate_pprof_endpoint`, `generate_load_test`, `run_cpu_profile` — without modifying them. See [Tool Reference](#tool-reference) below for parameters and behavior.
 
-1. **analyze_pprof_profile** — Analyze Go pprof CPU profiles and generate optimization patches
-2. **integrate_pprof_endpoint** — Add pprof endpoint integration guidance to a Go service
-3. **generate_load_test** — Generate load test scripts for Go services
-4. **run_cpu_profile** — Execute CPU profiling with concurrent load testing
-
-Unlike the GitHub Action (which makes external LLM API calls) or the Claude Code Skill (which is Claude Code-only), the MCP server works with any MCP-compatible agent host, including Claude Desktop, Cline, Cursor, and others.
+Unlike the GitHub Action (external LLM API calls) or the Claude Code Skill (Claude Code-only), it works with any MCP-compatible agent host.
 
 ## Installation
 
