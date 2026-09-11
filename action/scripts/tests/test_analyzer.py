@@ -46,10 +46,16 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch, call
 
 import pytest
-from litellm.types.utils import ChatCompletionMessageToolCall, ModelResponse
+from litellm.types.utils import (
+    AllMessageValues,
+    ChatCompletionMessageToolCall,
+    ChatCompletionToolParam,
+    ModelResponse,
+)
 
 import analyzer
 from analyzer import (
@@ -954,6 +960,7 @@ class TestGitApplyCheck:
         )
 
         result = _git_apply_check("--- a/file\n+++ b/file\n")
+        assert result is not None
         assert "timed out" in result.lower()
 
     def test_check_no_stderr_uses_default(self, mocker, tmp_artifacts_dir):
@@ -964,6 +971,7 @@ class TestGitApplyCheck:
         mocker.patch("analyzer.subprocess.run", return_value=mock_result)
 
         result = _git_apply_check("--- a/file\n+++ b/file\n")
+        assert result is not None
         assert "failed with no stderr" in result
 
     def test_check_writes_patch_file(self, mocker, tmp_artifacts_dir):
@@ -1199,7 +1207,7 @@ class TestCallLlm:
 
         mocker.patch("analyzer.litellm.completion", return_value=mock_completion)
 
-        messages = [{"role": "user", "content": "hi"}]
+        messages: list[AllMessageValues] = [{"role": "user", "content": "hi"}]
         text, returned_messages = call_llm(messages, mock_config)
         assert text == "LLM response text"
         assert returned_messages == messages
@@ -1213,7 +1221,7 @@ class TestCallLlm:
 
         mocker.patch("analyzer.litellm.completion", return_value=mock_completion)
 
-        messages = [{"role": "user", "content": "hi"}]
+        messages: list[AllMessageValues] = [{"role": "user", "content": "hi"}]
         text, returned_messages = call_llm(messages, mock_config)
         assert text == ""
         assert returned_messages == messages
@@ -1275,15 +1283,16 @@ class TestCallLlm:
             return_value="L1| package main",
         )
 
-        messages = [{"role": "user", "content": "hi"}]
-        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        messages: list[AllMessageValues] = [{"role": "user", "content": "hi"}]
+        tools: list[ChatCompletionToolParam] = [{"type": "function", "function": {"name": "read_file"}}]
         text, returned_messages = call_llm(messages, mock_config, tools=tools)
 
         assert text == "final answer"
         tool_result_messages = [m for m in returned_messages if m.get("role") == "tool"]
         assert len(tool_result_messages) == 1
-        assert tool_result_messages[0]["tool_call_id"] == "call_1"
-        assert tool_result_messages[0]["content"] == "L1| package main"
+        tool_msg = cast(dict[str, object], tool_result_messages[0])
+        assert tool_msg["tool_call_id"] == "call_1"
+        assert tool_msg["content"] == "L1| package main"
 
     def test_call_llm_filters_non_function_tool_call(self, mocker, mock_config):
         """A non-function tool call is filtered out and never executed."""
@@ -1305,8 +1314,8 @@ class TestCallLlm:
         )
         mock_execute = mocker.patch("analyzer._execute_read_file_tool")
 
-        messages = [{"role": "user", "content": "hi"}]
-        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        messages: list[AllMessageValues] = [{"role": "user", "content": "hi"}]
+        tools: list[ChatCompletionToolParam] = [{"type": "function", "function": {"name": "read_file"}}]
         text, returned_messages = call_llm(messages, mock_config, tools=tools)
 
         assert text == "final answer"
@@ -1330,8 +1339,8 @@ class TestCallLlm:
         mocker.patch("analyzer.litellm.completion", return_value=looping_completion)
         mocker.patch("analyzer._execute_read_file_tool", return_value="ok")
 
-        messages = [{"role": "user", "content": "hi"}]
-        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        messages: list[AllMessageValues] = [{"role": "user", "content": "hi"}]
+        tools: list[ChatCompletionToolParam] = [{"type": "function", "function": {"name": "read_file"}}]
         with pytest.raises(AnalyzerError) as exc_info:
             call_llm(messages, mock_config, tools=tools)
         assert exc_info.value.step == "1f"
