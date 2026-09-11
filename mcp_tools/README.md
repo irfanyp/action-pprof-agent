@@ -1,6 +1,6 @@
 # MCP Server: pprof-analyzer
 
-An MCP (Model Context Protocol) server exposing the four pprof-analyzer skills as tools for Claude Code, Claude Desktop, Cline, Cursor, and other MCP-native AI agents.
+An MCP server exposing the four pprof-analyzer skills as tools for Claude Code, Claude Desktop, Cline, Cursor, and other MCP-native AI agents.
 
 ## What is this?
 
@@ -15,7 +15,7 @@ Unlike the GitHub Action (external LLM API calls) or the Claude Code Skill (Clau
 - Python 3.12+ (required by MCP v2.x)
 - `pprof-to-md` npm binary in PATH (for profile conversion)
 - `git` CLI available
-- Go toolchain (for `run_cpu_profile_tool` only)
+- Go toolchain (for `run_cpu_profile` tool only)
 
 ### Setup
 
@@ -25,25 +25,14 @@ make setup-env
 
 ## Testing Locally
 
-Run the test suite:
-
 ```bash
-make test-mcp
+make test-mcp                    # run the test suite
+mcp dev mcp_server.py            # launch MCP Inspector for manual testing
 ```
-
-Launch MCP Inspector for manual testing:
-
-```bash
-mcp dev mcp_server.py
-```
-
-This opens an interactive MCP Inspector where you can call tools directly.
 
 ## Registration
 
 ### Claude Code
-
-Register the server with the local project:
 
 ```bash
 claude mcp add --transport stdio pprof-analyzer --scope project -- \
@@ -69,37 +58,9 @@ Tools will appear as:
 }
 ```
 
-### Claude Desktop
+### Claude Desktop / Cline / Cursor
 
-Edit `~/.claude_desktop/claude_desktop_config.json` (or `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
-
-```json
-{
-  "mcpServers": {
-    "pprof-analyzer": {
-      "command": "python3",
-      "args": ["/absolute/path/to/pprof-analyzer/mcp_server.py"]
-    }
-  }
-}
-```
-
-Restart Claude Desktop to load the server.
-
-### Cline (VSCode Extension)
-
-Create `.cline_mcp_settings.json` in your project root:
-
-```json
-{
-  "mcpServers": {
-    "pprof-analyzer": {
-      "command": "python3",
-      "args": ["/absolute/path/to/pprof-analyzer/mcp_server.py"]
-    }
-  }
-}
-```
+See [MCP_SETUP.md](../MCP_SETUP.md) for registration examples with `claude_desktop_config.json` and `.cline_mcp_settings.json`.
 
 ## Tool Reference
 
@@ -122,24 +83,17 @@ The `run_cpu_profile_tool` is guarded by a per-repo concurrency lock within a si
 
 ## Troubleshooting
 
-**"Module not found" error:**
-Ensure the repository root is on `sys.path` so `skill/` and `mcp_tools/` can be imported.
-
-**`run_cpu_profile_tool` timeouts:**
-Increase the timeout in your agent's configuration (e.g., 300 seconds for Claude Code).
-
-**Profile location issues:**
-Profiles are written to `.ai_output/cpu.prof` relative to the repo path, not the MCP server's working directory.
+| Problem | Fix |
+|---|---|
+| "Module not found" | Ensure the repository root is on `sys.path` so `skill/` and `mcp_tools/` can be imported |
+| `run_cpu_profile_tool` timeouts | Increase the timeout in your agent's configuration (e.g., 300 seconds for Claude Code) |
+| Profile location issues | Profiles are written to `.ai_output/cpu.prof` relative to the repo path, not the MCP server's working directory |
 
 ## Development
 
-### Running Tests
-
 ```bash
-make test-mcp
+make test-mcp    # all tests are mocked (no real skill scripts are called)
 ```
-
-All tests are mocked (no real skill scripts are called).
 
 ### Adding a New Tool
 
@@ -152,4 +106,5 @@ All tests are mocked (no real skill scripts are called).
 
 - [Root README](../README.md) — Overview of three implementations
 - [AGENTS.md](../AGENTS.md) — Architecture and design decisions
+- [MCP_SETUP.md](../MCP_SETUP.md) — Setup, Docker, and remote usage
 - [Skills documentation](../skill/) — Individual skill descriptions

@@ -1,6 +1,6 @@
 # pprof-analyzer
 
-Analyze Go pprof profiles and generate performance optimization patches using LLM-powered analysis. Three implementations are available — pick the one that matches your workflow.
+Analyze Go pprof profiles and generate performance optimization patches using LLM-powered analysis. Three implementations — pick the one that matches your workflow.
 
 ## Quick Navigation
 
@@ -24,7 +24,7 @@ Four complementary Claude Code skills covering the full workflow from pprof inte
 /pprof-analyzer cpu.prof ./ med
 ```
 
-Zero configuration, and easy to share with teammates as a self-contained skill folder. Best for developers optimizing code locally.
+Zero configuration, self-contained skill folder. Best for developers optimizing code locally.
 
 ### CI/CD Automation — [`action/README.md`](action/README.md)
 
@@ -53,7 +53,7 @@ claude mcp add --transport stdio pprof-analyzer --scope project -- \
   python3 $(pwd)/mcp_server.py
 ```
 
-**HTTP/SSE** (multiple users, team collaboration, supports concurrent clients):
+**HTTP/SSE** (multiple users, team collaboration):
 ```bash
 python3 mcp_server_http.py              # Runs on http://localhost:8000
 # Multiple agents connect to: http://localhost:8000/sse
@@ -77,6 +77,6 @@ Best for teams sharing analysis tools across multiple AI agents.
 ## Documentation
 
 - **[MCP_SETUP.md](MCP_SETUP.md)** — MCP server setup, Docker, and production deployment
-- **[AGENTS.md](AGENTS.md)** — Developer reference: flow documentation, conventions, and contribution guidelines for all implementations
+- **[AGENTS.md](AGENTS.md)** — Developer reference: flow documentation, conventions, and contribution guidelines
 - **[skill/README.md](skill/README.md)** — Claude Code skill usage, design, and distribution
 - **[prompts/pprof_integration.md](prompts/pprof_integration.md)** — How to add pprof to your Go service

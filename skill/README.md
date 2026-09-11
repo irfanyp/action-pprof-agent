@@ -2,7 +2,7 @@
 
 Analyze Go pprof profiles and generate performance optimization patches in Claude Code — no API keys, no external LLM calls, no agent-loop code to maintain. It's the standalone, fully-local Claude Code skill form of the [pprof-analyzer GitHub Action](https://github.com/irfanyp/action-pprof-agent).
 
-> **Source repo vs. distributed ZIP:** in this repository, skill directories use underscores (`skill/pprof_analyzer/`, `skill/load_test_generator/`, …) so they can be imported as Python modules by the MCP server. The distributed ZIP renames them to hyphens (`pprof-analyzer/`, …) and installs them to `~/.claude/skills/`, for backward compatibility with the original distribution format.
+> **Source repo vs. distributed ZIP:** in this repository, skill directories use underscores (`skill/pprof_analyzer/`, `skill/load_test_generator/`, …) so they can be imported as Python modules by the MCP server. The distributed ZIP renames them to hyphens (`pprof-analyzer/`, …) and installs them to `~/.claude/skills/`.
 
 ## The Four Skills
 
@@ -42,7 +42,7 @@ git apply .ai_output/patch.diff && git commit -m "perf: optimize based on profil
 ```bash
 unzip pprof-analyzer-skill.zip
 cd pprof-analyzer-skill/
-./SETUP.sh install     # installs skill files to ~/.claude/skills/, plus GitPython + pprof-to-md
+./SETUP.sh install
 ./SETUP.sh verify
 ```
 
@@ -51,24 +51,11 @@ cd pprof-analyzer-skill/
 make install-claude-skill
 ```
 
-The ZIP extracts into a single flat `pprof-analyzer-skill/` directory:
-```
-pprof-analyzer-skill/
-├── SETUP.sh                  # install / verify / uninstall
-├── README.md, INSTALL.md     # docs
-├── prompts/                  # prompt_template.txt, pprof_integration.md — shared, installed to ~/.claude/prompts/
-├── pprof-analyzer/           # analyzer.py, requirements.txt, SKILL.md, tests/
-├── pprof-integrator/
-├── load-test-generator/
-└── profiler-executor/
-```
-See [INSTALL.md](INSTALL.md) for manual installation and detailed prerequisites.
+See [INSTALL.md](INSTALL.md) for manual installation and prerequisites.
 
 ## How It Works
 
-The GitHub Action runs a **custom multi-turn agent loop against an external LLM API**: it sends the profile plus a bare file list, the LLM calls a `read_file` tool, the Action's Python code intercepts that call and returns the file, and this repeats (up to ~10 times) until the LLM returns a patch.
-
-This skill uses **Claude Code's own agentic capabilities** instead: convert the profile to markdown (`pprof-to-md`) and list the repo's Go files (`git ls-files`) — no source is read yet — then hand both to Claude in one prompt. Claude, already running inside Claude Code with its own native `Read` tool, pulls whichever files it needs directly from the repo — no tool-call interception, no external API client. It returns `### SUMMARY` + `### PATCH`; the skill validates the patch with `git apply --check` and writes artifacts.
+The GitHub Action runs a custom multi-turn agent loop against an external LLM API. This skill uses **Claude Code's own agentic capabilities** instead: convert the profile to markdown (`pprof-to-md`) and list the repo's Go files (`git ls-files`) — no source is read yet — then hand both to Claude in one prompt. Claude pulls whichever files it needs directly from the repo via its native `Read` tool. It returns `### SUMMARY` + `### PATCH`; the skill validates the patch with `git apply --check` and writes artifacts.
 
 |  | GitHub Action | Skill |
 |---|---|---|
@@ -88,12 +75,6 @@ This skill uses **Claude Code's own agentic capabilities** instead: convert the 
 - `repo_path` — path to the Go repository root
 - `reference_level` — `low`, `med`, or `high` (analysis depth; see below)
 
-```bash
-/pprof-analyzer cpu.prof ./ med                    # medium-depth CPU profile analysis
-/pprof-analyzer /var/tmp/mem.prof ~/myproject high # comprehensive memory profile analysis
-/pprof-analyzer profile.pb.gz ./ low               # conservative, single-hotspot fix
-```
-
 All artifacts go to `.ai_output/`:
 ```
 .ai_output/
@@ -101,13 +82,6 @@ All artifacts go to `.ai_output/`:
 ├── patch.diff           # unified diff (apply with: git apply)
 ├── analyzer_result.md   # detailed pprof analysis
 └── prompt.txt           # full prompt sent to Claude (for debugging)
-```
-
-```bash
-cat .ai_output/summary.md && cat .ai_output/patch.diff   # review
-git apply .ai_output/patch.diff                           # apply
-go test ./...                                             # verify
-git commit -m "perf: optimize hotspots per pprof analysis"
 ```
 
 ### Reference levels
@@ -118,24 +92,13 @@ git commit -m "perf: optimize hotspots per pprof analysis"
 
 ## Supporting Skills
 
-**pprof-integrator** — adds `net/http/pprof` per the [prompts/pprof_integration.md](../prompts/pprof_integration.md) guide, detecting your framework (gin, echo, fiber, chi, net/http, …) and generating a dedicated pprof server on port 9987.
-```bash
-/pprof-integrator ./my-service
-```
-
-**load-test-generator** — inspects your service's HTTP endpoints and generates a load test script (k6, Apache Bench, wrk, or custom Go) to drive traffic during profiling.
-```bash
-/load-test-generator ./my-service --tool k6
-```
-
-**profiler-executor** — builds and starts your service, runs `go tool pprof .../profile?seconds=30` alongside your load test, captures `cpu.prof` to `.ai_output/`, then stops the service.
-```bash
-/profiler-executor ./my-service --load-cmd "k6 run load_test.js" --duration 30
-```
+- **pprof-integrator** — adds `net/http/pprof` per the [pprof_integration.md](../prompts/pprof_integration.md) guide, detecting your framework and generating a dedicated pprof server on port 9987.
+- **load-test-generator** — inspects your service's HTTP endpoints and generates a load test script (k6, Apache Bench, wrk, or custom Go).
+- **profiler-executor** — builds and starts your service, runs `go tool pprof` alongside your load test, captures `cpu.prof` to `.ai_output/`.
 
 ### Creating a profile manually
 
-If pprof is already integrated, you can skip profiler-executor and pull profiles directly:
+If pprof is already integrated, skip profiler-executor and pull profiles directly:
 ```bash
 curl http://localhost:9987/debug/pprof/profile?seconds=30 > cpu.prof   # CPU
 curl http://localhost:9987/debug/pprof/heap > mem.prof                 # memory
@@ -145,7 +108,7 @@ curl http://localhost:9987/debug/pprof/goroutine > goroutines.prof     # gorouti
 ## Troubleshooting
 
 - **"pprof-to-md not found"** — `make install-pprof-to-md`
-- **Patch doesn't apply cleanly** — inspect `.ai_output/prompt.txt` to see exactly what Claude received, then retry with a different `reference_level` (e.g. `low` for a smaller, safer patch)
+- **Patch doesn't apply cleanly** — inspect `.ai_output/prompt.txt`, then retry with a different `reference_level` (e.g. `low` for a smaller, safer patch)
 - More detail: [INSTALL.md](INSTALL.md)
 
 ## Development
@@ -155,11 +118,8 @@ pytest skill/pprof_analyzer/tests/   # one skill's tests
 make test-skill                      # all skill tests
 ```
 
-- **Prompt**: edit [prompts/prompt_template.txt](../prompts/prompt_template.txt) (shared with the Action and MCP server — see [AGENTS.md](../AGENTS.md) for the sync rules) — key placeholders are `{reference_level}`, `{analyzer_result}`, `{file_list}`.
-- **File listing**: `gather_local_context()` in `skill/pprof_analyzer/analyzer.py`.
+- **Prompt**: edit [prompts/prompt_template.txt](../prompts/prompt_template.txt) (shared with the Action and MCP server — see [AGENTS.md](../AGENTS.md) for sync rules).
 - **Rebuild the distributed ZIP** after any change under `skill/` or to `prompts/pprof_integration.md`: `make build-claude-skill`.
-
-The skill is designed to be minimal — discuss any major change before implementing (see [AGENTS.md](../AGENTS.md)).
 
 ### Known limitations
 
@@ -168,23 +128,15 @@ The skill is designed to be minimal — discuss any major change before implemen
 
 ## FAQ
 
-**Why not use a custom agent loop like the Action?** Claude Code already gives Claude a native `Read` tool — no need to reimplement a `read_file` request/response loop in Python.
+**Why not use a custom agent loop like the Action?** Claude Code already gives Claude a native `Read` tool — no need to reimplement a `read_file` loop in Python.
 
-**Can I add more files to the analysis?** No cap to change — Claude reads whatever it decides it needs.
+**Can I use a different LLM?** Not with this skill; it's built for Claude Code. The GitHub Action supports OpenAI-compatible endpoints.
 
-**How much does it cost?** Nothing extra — it uses Claude Code's built-in model, no external API calls.
-
-**Can I use a different LLM?** Not with this skill; it's built for Claude Code. The GitHub Action supports OpenAI-compatible endpoints if you need that.
-
-**Does it work on Windows?** Yes, via WSL2 or Python 3.12+ with Git Bash (`SETUP.sh` is bash).
+**Does it work on Windows?** Yes, via WSL2 or Python 3.12+ with Git Bash.
 
 ## Reporting issues
 
 Include `.ai_output/prompt.txt` (what was sent to Claude) and `.ai_output/patch.diff` (what came back).
-
-## License
-
-Same as the pprof-analyzer action.
 
 ## See Also
 
