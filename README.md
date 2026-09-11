@@ -18,7 +18,7 @@ Four complementary Claude Code skills covering the full workflow from pprof inte
 /pprof-integrator ./my-service          # Add pprof endpoint
 /load-test-generator ./my-service       # Generate load test
 /profiler-executor ./my-service         # Capture cpu.prof
-/pprof-analyzer ./my-service --profile .ai_output/cpu.prof --reference med
+/pprof-analyzer .ai_output/cpu.prof ./my-service med
 
 # Or just analyze an existing profile
 /pprof-analyzer cpu.prof ./ med

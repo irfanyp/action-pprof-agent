@@ -8,7 +8,7 @@ Complete installation instructions for the four Claude Code skills.
 - **Python 3.12+** (for the skills)
 - **Git** (for repository operations)
 - **npm** (for `pprof-to-md` tool)
-- **Node.js 16+** (for npm)
+- **Node.js 22+** (for npm)
 
 ## Quick Install (Recommended)
 
@@ -23,7 +23,7 @@ This creates a single `pprof-analyzer-skill/` directory:
 
 ```bash
 ls
-# Should see: SETUP.sh, pprof-analyzer.md, pprof-integrator.md, ...
+# Should see: SETUP.sh, README.md, INSTALL.md, prompts/, pprof-analyzer/, pprof-integrator/, ...
 ```
 
 ### Step 2: Run the Setup Script
@@ -72,8 +72,7 @@ cd pprof-analyzer-skill/
 # Create the skills directory if it doesn't exist
 mkdir -p ~/.claude/skills
 
-# Copy skill definitions and implementations
-cp *.md ~/.claude/skills/
+# Copy skill directories (each contains SKILL.md + implementation files)
 cp -r pprof-analyzer/ pprof-integrator/ load-test-generator/ profiler-executor/ ~/.claude/skills/
 
 # Copy shared prompt files (prompt_template.txt, pprof_integration.md, ...) —
@@ -111,8 +110,8 @@ python3 -c "import git; print('✓ GitPython installed')"
 # Check npm package
 pprof-to-md --version
 
-# Check skill files
-ls ~/.claude/skills/*.md
+# Check skill directories (each should contain SKILL.md)
+ls ~/.claude/skills/
 
 # Check shared prompt files
 ls ~/.claude/prompts/
@@ -158,7 +157,7 @@ chmod +x SETUP.sh
 3. Check skill directory:
    ```bash
    ls -la ~/.claude/skills/
-   # Should show pprof-analyzer.md, pprof-integrator.md, etc.
+   # Should show pprof-analyzer/, pprof-integrator/, etc. (each with SKILL.md inside)
    ```
 
 ## Uninstall
@@ -171,14 +170,11 @@ To remove the skills:
 
 Or manually:
 ```bash
-rm -rf ~/.claude/skills/pprof-analyzer.md
 rm -rf ~/.claude/skills/pprof-analyzer/
-rm -rf ~/.claude/skills/pprof-integrator.md
 rm -rf ~/.claude/skills/pprof-integrator/
-rm -rf ~/.claude/skills/load-test-generator.md
 rm -rf ~/.claude/skills/load-test-generator/
-rm -rf ~/.claude/skills/profiler-executor.md
 rm -rf ~/.claude/skills/profiler-executor/
+rm -rf ~/.claude/prompts/
 ```
 
 ## Usage After Installation
@@ -253,10 +249,6 @@ After installation, skills are located at:
 
 ```
 ~/.claude/skills/
-├── pprof-analyzer.md
-├── pprof-integrator.md
-├── load-test-generator.md
-├── profiler-executor.md
 ├── pprof-analyzer/
 │   ├── analyzer.py
 │   ├── requirements.txt
@@ -265,8 +257,15 @@ After installation, skills are located at:
 │   ├── prompts/
 │   └── tests/
 ├── pprof-integrator/
+│   └── SKILL.md, coordinator.py, ...
 ├── load-test-generator/
+│   └── SKILL.md, coordinator.py, ...
 └── profiler-executor/
+    └── SKILL.md, profiler.py, ...
+
+~/.claude/prompts/
+├── prompt_template.txt
+└── pprof_integration.md
 ```
 
 ## Support

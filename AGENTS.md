@@ -43,7 +43,7 @@ Unlike the Action, the skill has: no external LLM calls, no custom `read_file` l
 | `load-test-generator` | Generate load test from detected endpoints | `/load-test-generator <repo> [--tool k6\|apache-bench\|wrk\|go]` | e.g. `load_test.js` |
 | `profiler-executor` | Build+run service, profile + load test in parallel | `/profiler-executor <repo> [--port] [--load-cmd] [--duration]` | `.ai_output/cpu.prof` |
 
-Full chain: `pprof-integrator` → commit → `load-test-generator` → `profiler-executor` (produces `.ai_output/cpu.prof`) → `pprof-analyzer --profile .ai_output/cpu.prof` → review/apply patch. Requires: `go.mod` present, Go 1.11+, `pprof-to-md` on PATH (`make install-pprof-to-md`), a load-test tool.
+Full chain: `pprof-integrator` → commit → `load-test-generator` → `profiler-executor` (produces `.ai_output/cpu.prof`) → `pprof-analyzer .ai_output/cpu.prof <repo> med` → review/apply patch. Requires: `go.mod` present, Go 1.20+, `pprof-to-md` on PATH (`make install-pprof-to-md`), a load-test tool.
 
 ## Syncing Action ↔ Skill ↔ MCP
 
@@ -54,7 +54,7 @@ Action and Skill are **intentionally different** (external multi-turn LLM API + 
 | `PATCH_FENCE_PATTERN`, `SUMMARY_PATTERN` | `Config` in both `analyzer.py` files | LLM response format changes |
 | `VALID_REFERENCES = {low, med, high}` | `Config`/`SkillConfig`, skill argparse `choices=`, MCP `Literal[...]` type hints | Adding/removing a reference level |
 | `--tool` choices `{k6, apache-bench, wrk, go}` | skill argparse, MCP type hints | Adding a load-test tool |
-| `PPROF_TO_MD_TIMEOUT` (60s), `GIT_OPERATIONS_TIMEOUT` (120s) | both `analyzer.py` files | Rarely |
+| `PPROF_TO_MD_TIMEOUT` (60s), `GIT_OPERATIONS_TIMEOUT` (120s) | both `analyzer.py` files (Action names them `PPROF_TO_MD_TIMEOUT_SECONDS` / `GIT_OPERATIONS_TIMEOUT_SECONDS`; Skill uses the shorter names) | Rarely |
 | `GitPython~=3.1.59` pin | `skill/pprof_analyzer/requirements.txt`, `mcp_tools/requirements.txt` | Skill upgrades GitPython |
 | [prompts/prompt_template.txt](prompts/prompt_template.txt) (single source of truth, repo root) | Action reads `../../../prompts/...`, Skill/MCP read `../../prompts/...`; also bundled by [Dockerfile](Dockerfile) and [skill/build-zip.sh](skill/build-zip.sh) (`make build-claude-skill`) | Prompt structure changes — edit once, all three pick it up |
 | [prompts/pprof_integration.md](prompts/pprof_integration.md) (single source of truth, repo root) | Read only by `skill/pprof_integrator/coordinator.py` via the same `parents[2] / "prompts" / ...` resolution as the prompt template above (MCP inherits it by importing `coordinator.py`; the Action doesn't read it programmatically, only links to it from docs) | pprof integration guidance changes — edit once, no second copy to update |

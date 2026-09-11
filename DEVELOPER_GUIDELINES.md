@@ -18,7 +18,7 @@ Optimize your Go application's CPU performance with LLM-powered analysis — man
 ## Prerequisites
 
 1. **Go** (1.20+) — compile, run, and analyze profiles.
-2. **Node.js** (18+) — run the `pprof-to-md` utility.
+2. **Node.js** (22+) — run the `pprof-to-md` utility.
 3. **Python** (3.12+) — only for automated local scripts/MCP server.
 
 ---
@@ -131,7 +131,7 @@ This registers four commands in your local Claude Code CLI.
 /profiler-executor ./my-go-service --duration 30
 
 # 4. Convert profile, analyze codebase, output code patches
-/pprof-analyzer ./my-go-service --profile .ai_output/cpu.prof --reference med
+/pprof-analyzer .ai_output/cpu.prof ./my-go-service med
 ```
 
 ---

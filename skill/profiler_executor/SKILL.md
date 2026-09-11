@@ -20,7 +20,7 @@ Executes Go CPU profiling with concurrent load testing to capture realistic perf
 1. Validates service repo has pprof endpoint integrated (checks for pprof port 9987 by default)
 2. Builds and starts the service in background
 3. Runs profiler and load test **in parallel**:
-   - **Profiler:** `go tool pprof -text localhost:9987/debug/pprof/profile?seconds=30 > cpu.prof`
+   - **Profiler:** `go tool pprof -text http://localhost:9987/debug/pprof/profile?seconds=30 > cpu.prof`
    - **Load test:** Executes load test command (curl loop, k6, wrk, etc.)
 4. Captures `cpu.prof` and stops the service
 5. Outputs profile to `.ai_output/cpu.prof` (ready for `pprof-analyzer`)
@@ -58,5 +58,5 @@ Executes profiling for 30 seconds while running k6 load test, captures `cpu.prof
 
 After profiling completes, run `pprof-analyzer` on the generated `cpu.prof`:
 ```
-/pprof-analyzer ./my-go-service --profile .ai_output/cpu.prof --reference med
+/pprof-analyzer .ai_output/cpu.prof ./my-go-service med
 ```

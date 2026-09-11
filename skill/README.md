@@ -1,6 +1,6 @@
 # pprof-analyzer Claude Skill
 
-Analyze Go pprof profiles and generate performance optimization patches in Claude Code — no API keys, no external LLM calls, no agent-loop code to maintain. It's the standalone, fully-local Claude Code skill form of the [pprof-analyzer GitHub Action](https://github.com/irfanyusupramono/pprof-analyzer).
+Analyze Go pprof profiles and generate performance optimization patches in Claude Code — no API keys, no external LLM calls, no agent-loop code to maintain. It's the standalone, fully-local Claude Code skill form of the [pprof-analyzer GitHub Action](https://github.com/irfanyp/action-pprof-agent).
 
 > **Source repo vs. distributed ZIP:** in this repository, skill directories use underscores (`skill/pprof_analyzer/`, `skill/load_test_generator/`, …) so they can be imported as Python modules by the MCP server. The distributed ZIP renames them to hyphens (`pprof-analyzer/`, …) and installs them to `~/.claude/skills/`, for backward compatibility with the original distribution format.
 
@@ -32,7 +32,7 @@ Starting from a raw service with no pprof endpoint yet?
 /pprof-integrator ./my-service                                        # integrate pprof endpoint, then commit
 /load-test-generator ./my-service --tool k6                           # generate load_test.js
 /profiler-executor ./my-service --load-cmd "k6 run load_test.js"      # capture .ai_output/cpu.prof
-/pprof-analyzer ./my-service --profile .ai_output/cpu.prof --reference med
+/pprof-analyzer .ai_output/cpu.prof ./my-service med
 git apply .ai_output/patch.diff && git commit -m "perf: optimize based on profile analysis"
 ```
 

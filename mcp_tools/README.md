@@ -4,7 +4,7 @@ An MCP (Model Context Protocol) server exposing the four pprof-analyzer skills a
 
 ## What is this?
 
-This server wraps the four existing skills (`skill/`) as MCP tools — `analyze_pprof_profile`, `integrate_pprof_endpoint`, `generate_load_test`, `run_cpu_profile` — without modifying them. See [Tool Reference](#tool-reference) below for parameters and behavior.
+This server wraps the four existing skills (`skill/`) as five MCP tools — `analyze_pprof_profile_tool`, `build_pprof_analysis_prompt_tool`, `integrate_pprof_endpoint_tool`, `generate_load_test_tool`, `run_cpu_profile_tool` — without modifying them. See [Tool Reference](#tool-reference) below for parameters and behavior.
 
 Unlike the GitHub Action (external LLM API calls) or the Claude Code Skill (Claude Code-only), it works with any MCP-compatible agent host.
 
@@ -15,7 +15,7 @@ Unlike the GitHub Action (external LLM API calls) or the Claude Code Skill (Clau
 - Python 3.12+ (required by MCP v2.x)
 - `pprof-to-md` npm binary in PATH (for profile conversion)
 - `git` CLI available
-- Go toolchain (for `run_cpu_profile` tool only)
+- Go toolchain (for `run_cpu_profile_tool` only)
 
 ### Setup
 
@@ -34,7 +34,7 @@ make test-mcp
 Launch MCP Inspector for manual testing:
 
 ```bash
-mcp dev mcp_tools/main.py
+mcp dev mcp_server.py
 ```
 
 This opens an interactive MCP Inspector where you can call tools directly.
@@ -47,21 +47,22 @@ Register the server with the local project:
 
 ```bash
 claude mcp add --transport stdio pprof-analyzer --scope project -- \
-  python3 $(pwd)/mcp_tools/main.py
+  python3 $(pwd)/mcp_server.py
 ```
 
 Tools will appear as:
-- `mcp__pprof-analyzer__analyze_pprof_profile`
-- `mcp__pprof-analyzer__integrate_pprof_endpoint`
-- `mcp__pprof-analyzer__generate_load_test`
-- `mcp__pprof-analyzer__run_cpu_profile`
+- `mcp__pprof-analyzer__analyze_pprof_profile_tool`
+- `mcp__pprof-analyzer__build_pprof_analysis_prompt_tool`
+- `mcp__pprof-analyzer__integrate_pprof_endpoint_tool`
+- `mcp__pprof-analyzer__generate_load_test_tool`
+- `mcp__pprof-analyzer__run_cpu_profile_tool`
 
-**Important:** Increase the timeout in `.claude/settings.json` for `run_cpu_profile`:
+**Important:** Increase the timeout in `.claude/settings.json` for `run_cpu_profile_tool`:
 
 ```json
 {
   "permissions": {
-    "mcp__pprof-analyzer__run_cpu_profile": {
+    "mcp__pprof-analyzer__run_cpu_profile_tool": {
       "timeout": 300000
     }
   }
@@ -77,7 +78,7 @@ Edit `~/.claude_desktop/claude_desktop_config.json` (or `%APPDATA%\Claude\claude
   "mcpServers": {
     "pprof-analyzer": {
       "command": "python3",
-      "args": ["/absolute/path/to/pprof-analyzer/mcp_tools/main.py"]
+      "args": ["/absolute/path/to/pprof-analyzer/mcp_server.py"]
     }
   }
 }
@@ -94,7 +95,7 @@ Create `.cline_mcp_settings.json` in your project root:
   "mcpServers": {
     "pprof-analyzer": {
       "command": "python3",
-      "args": ["/absolute/path/to/pprof-analyzer/mcp_tools/main.py"]
+      "args": ["/absolute/path/to/pprof-analyzer/mcp_server.py"]
     }
   }
 }
@@ -104,15 +105,15 @@ Create `.cline_mcp_settings.json` in your project root:
 
 | Tool | Parameters | Returns | Notes |
 |------|-----------|---------|-------|
-| `analyze_pprof_profile` | `profile_path: str`, `repo_path: str`, `reference_level: str = "med"` | Analysis prompt for LLM | Path-based; requires `profile_path`/`repo_path` to exist on the machine running the MCP server (local/stdio only) |
-| `build_pprof_analysis_prompt` | `analyzer_result: str`, `file_list: list[str]`, `reference_level: str = "med"` | Analysis prompt for LLM | Content-only, remote-safe variant of `analyze_pprof_profile` — see [MCP_SETUP.md](../MCP_SETUP.md#team-collaboration-httpsse) |
-| `integrate_pprof_endpoint` | `repo_path: str` | Integration guidance prompt | Returns prompt for pprof endpoint setup; set `PPROF_VERIFY_LOCAL_PATHS=false` server-side for remote callers |
-| `generate_load_test` | `repo_path: str`, `tool: str = "k6"` | Load test generation prompt | Tool choices: `k6`, `apache-bench`, `wrk`, `go`; same `PPROF_VERIFY_LOCAL_PATHS` note as above |
-| `run_cpu_profile` | `repo_path: str`, `port: int = 8080`, `load_cmd: str \| None`, `duration: int = 30` | Profile location + summary | ~30s typical latency, up to 120s+ for slow builds; disabled unless `MCP_ENABLE_CPU_PROFILE=1` is set on the server |
+| `analyze_pprof_profile_tool` | `profile_path: str`, `repo_path: str`, `reference_level: str = "med"` | Analysis prompt for LLM | Path-based; requires `profile_path`/`repo_path` to exist on the machine running the MCP server (local/stdio only) |
+| `build_pprof_analysis_prompt_tool` | `analyzer_result: str`, `file_list: list[str]`, `reference_level: str = "med"` | Analysis prompt for LLM | Content-only, remote-safe variant of `analyze_pprof_profile_tool` — see [MCP_SETUP.md](../MCP_SETUP.md#team-collaboration-httpsse) |
+| `integrate_pprof_endpoint_tool` | `repo_path: str` | Integration guidance prompt | Returns prompt for pprof endpoint setup; set `PPROF_VERIFY_LOCAL_PATHS=false` server-side for remote callers |
+| `generate_load_test_tool` | `repo_path: str`, `tool: str = "k6"` | Load test generation prompt | Tool choices: `k6`, `apache-bench`, `wrk`, `go`; same `PPROF_VERIFY_LOCAL_PATHS` note as above |
+| `run_cpu_profile_tool` | `repo_path: str`, `port: int = 8080`, `load_cmd: str \| None`, `duration: int = 30` | Profile location + summary | ~30s typical latency, up to 120s+ for slow builds; disabled unless `MCP_ENABLE_CPU_PROFILE=1` is set on the server |
 
 ## Concurrency Behavior
 
-The `run_cpu_profile` tool is guarded by a per-repo concurrency lock within a single server process:
+The `run_cpu_profile_tool` is guarded by a per-repo concurrency lock within a single server process:
 
 - Only one call per `repo_path` can run at a time
 - Overlapping calls for the same repo raise `RuntimeError` immediately
@@ -124,7 +125,7 @@ The `run_cpu_profile` tool is guarded by a per-repo concurrency lock within a si
 **"Module not found" error:**
 Ensure the repository root is on `sys.path` so `skill/` and `mcp_tools/` can be imported.
 
-**`run_cpu_profile` timeouts:**
+**`run_cpu_profile_tool` timeouts:**
 Increase the timeout in your agent's configuration (e.g., 300 seconds for Claude Code).
 
 **Profile location issues:**
