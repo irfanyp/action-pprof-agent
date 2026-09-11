@@ -31,6 +31,8 @@ import hmac
 import logging
 import os
 import sys
+from pathlib import Path
+
 from fastapi import FastAPI
 from starlette.responses import JSONResponse
 from uvicorn import Config, Server
@@ -44,6 +46,13 @@ from mcp_tools.main import (  # Import shared server with all tools defined
 API_KEY_NAME = "X-API-Key"
 API_KEY_HEADER = API_KEY_NAME.lower().encode("ascii")
 API_KEY_EXEMPT_PATHS = {"/health"}
+
+# Single source of truth for the project version is the root VERSION file
+# (also read dynamically by pyproject.toml). A direct file read rather than
+# importlib.metadata.version() because an editable install's metadata is
+# written once at `pip install -e .` time and would silently report a stale
+# version after a VERSION bump until reinstalled.
+_VERSION = (Path(__file__).resolve().parent / "VERSION").read_text().strip()
 
 
 def configure_http_only_tools() -> None:
@@ -119,7 +128,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="pprof-analyzer MCP Server",
     description="LLM-powered Go pprof profile analyzer via Model Context Protocol",
-    version="0.1.0",
+    version=_VERSION,
 )
 app.add_middleware(ApiKeyMiddleware)
 
@@ -130,7 +139,7 @@ async def root():
     tools = await server.list_tools()
     return {
         "name": "pprof-analyzer",
-        "version": "0.1.0",
+        "version": _VERSION,
         "description": "LLM-powered Go pprof profile analyzer",
         "protocol": "Model Context Protocol (MCP)",
         "transport": "HTTP + Server-Sent Events (SSE)",

@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Build skill ZIP
-        run: .claude/skills/build-zip.sh
+        run: skill/build-zip.sh
 
       - name: Create GitHub Release
         env:
