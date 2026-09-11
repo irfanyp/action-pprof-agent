@@ -19,7 +19,8 @@ skill/pprof-analyzer-skill.zip
 
 # IDE / tooling
 .workspace_rag/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 
 # AI / LLM generated markdown output
 # Track the folder itself, but ignore everything inside it

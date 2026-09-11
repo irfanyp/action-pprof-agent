@@ -1,0 +1,14 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/action/scripts"
+  ],
+  "python.terminal.activateEnvironment": true,
+  "python-envs.pythonProjects": [
+    {
+      "path": ".",
+      "envManager": "ms-python.python:venv"
+    }
+  ],
+  "python-envs.terminal.autoActivationType": "command"
+}
