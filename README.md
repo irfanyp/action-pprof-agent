@@ -1,17 +1,12 @@
 # pprof-analyzer
 
-Analyze Go pprof profiles and generate performance optimization patches using LLM-powered analysis.
+Analyze Go pprof profiles and generate performance optimization patches using LLM-powered analysis. Three implementations — pick the one that matches your workflow.
 
-**Three implementations — choose your path:**
+## Quick Navigation
 
----
+### Local Analysis — [`skill/README.md`](skill/README.md)
 
-## 🚀 Quick Navigation
-
-### For Local Analysis (Claude Code Skills)
-**👉 [`skill/README.md`](skill/README.md)**
-
-**Four complementary Claude Code skills for end-to-end performance optimization:**
+Four complementary Claude Code skills covering the full workflow from pprof integration to optimization:
 
 1. **`pprof-integrator`** — Integrate pprof endpoint into your Go service
 2. **`load-test-generator`** — Generate load test script for realistic profiling
@@ -23,31 +18,17 @@ Analyze Go pprof profiles and generate performance optimization patches using LL
 /pprof-integrator ./my-service          # Add pprof endpoint
 /load-test-generator ./my-service       # Generate load test
 /profiler-executor ./my-service         # Capture cpu.prof
-/pprof-analyzer ./my-service --profile .ai_output/cpu.prof --reference med
+/pprof-analyzer .ai_output/cpu.prof ./my-service med
 
 # Or just analyze an existing profile
 /pprof-analyzer cpu.prof ./ med
 ```
 
-**Features:**
-- ⚡ Zero configuration for analyzer (uses Claude's built-in capabilities)
-- ⏱️ 15-35 seconds per analysis  
-- 🧠 Complete workflow from integration to optimization
-- 💻 Single-turn analysis (no agent loop)
-- 📦 Easy to share with teammates
+Zero configuration, self-contained skill folder. Best for developers optimizing code locally.
 
-**Best for:** Developers optimizing code locally
+### CI/CD Automation — [`action/README.md`](action/README.md)
 
----
-
-### For CI/CD Automation (GitHub Action)
-**👉 [`action/README.md`](action/README.md)**
-
-- 🤖 Automated PR creation
-- 🔄 Multi-turn agent loop
-- 🔌 Service-based profiling
-- 🎯 Integrated in GitHub workflows
-- 📊 Deep analysis capabilities
+Runs as a service-based GitHub Action step with a multi-turn LLM agent loop, opening a Pull Request automatically.
 
 ```yaml
 - uses: <repo>@<version>
@@ -59,40 +40,28 @@ Analyze Go pprof profiles and generate performance optimization patches using LL
     tags: main
 ```
 
-**Best for:** Production automation & CI/CD pipelines
+Best for production automation and CI/CD pipelines.
 
----
+### AI Agents via MCP — [`MCP_SETUP.md`](MCP_SETUP.md) & [`mcp_tools/README.md`](mcp_tools/README.md)
 
-### For AI Agents via MCP (Claude Desktop, Cline, Cursor, etc.)
-**👉 [`MCP_SETUP.md`](MCP_SETUP.md) & [`mcp_tools/README.md`](mcp_tools/README.md)**
+Wraps the same four skills as MCP tools, usable from any MCP-compatible AI agent host. Two transport options:
 
-**Two transport options:**
-
-**Option A: Stdio** (Single user, local)
+**Stdio** (single user, local):
 ```bash
-python3 mcp_server.py
+make mcp-stdio-run
 claude mcp add --transport stdio pprof-analyzer --scope project -- \
   python3 $(pwd)/mcp_server.py
 ```
 
-**Option B: HTTP/SSE** (Multiple users, team collaboration) ⭐
+**HTTP/SSE** (multiple users, team collaboration):
 ```bash
 python3 mcp_server_http.py              # Runs on http://localhost:8000
 # Multiple agents connect to: http://localhost:8000/sse
 ```
 
-**Features:**
-- 🌐 Works with any MCP-compatible AI agent host
-- 🔧 Same four skills wrapped as MCP tools
-- 🤝 Share single server across team (HTTP option)
-- 📱 Claude Desktop, Cline, Cursor, VSCode support
-- ⚡ Concurrent client support (HTTP option)
+Best for teams sharing analysis tools across multiple AI agents.
 
-**Best for:** Teams using multiple AI agents, sharing analysis tools
-
----
-
-## 📊 Implementation Comparison
+## Implementation Comparison
 
 | Feature | Claude Code Skill | GitHub Action | MCP Server |
 |---------|------------------|----------------|-----------|
@@ -105,25 +74,9 @@ python3 mcp_server_http.py              # Runs on http://localhost:8000
 | **LLM Loop** | Single-turn | Multi-turn | Single-turn |
 | **Use Case** | Interactive local analysis | Production automation | Multi-agent teams |
 
----
-
-## 📚 Documentation
+## Documentation
 
 - **[MCP_SETUP.md](MCP_SETUP.md)** — MCP server setup, Docker, and production deployment
-- **[AGENTS.md](AGENTS.md)** — Developer reference (both implementations)
+- **[AGENTS.md](AGENTS.md)** — Developer reference: flow documentation, conventions, and contribution guidelines
 - **[skill/README.md](skill/README.md)** — Claude Code skill usage, design, and distribution
-- **[action/pprof_integration.md](action/pprof_integration.md)** — How to add pprof to your Go service
-
----
-
-## 🔧 For Developers
-
-See [AGENTS.md](AGENTS.md) for:
-- Complete flow documentation (both implementations)
-- Development conventions
-- Contribution guidelines
-- Decision philosophy
-
----
-
-For detailed setup and usage, choose your implementation above.
+- **[prompts/pprof_integration.md](prompts/pprof_integration.md)** — How to add pprof to your Go service

@@ -6,7 +6,7 @@ command: python3 coordinator.py
 
 # pprof-integrator
 
-Integrates Go `net/http/pprof` profiling endpoint into a service using the guidance from `action/pprof_integration.md`.
+Integrates Go `net/http/pprof` profiling endpoint into a service using the guidance from `prompts/pprof_integration.md`.
 
 ## Input
 
@@ -15,7 +15,7 @@ Integrates Go `net/http/pprof` profiling endpoint into a service using the guida
 ## Workflow
 
 1. Detects the Go framework in use (net/http, gin, echo, fiber, chi, gRPC, controller-runtime, etc.)
-2. Reads `action/pprof_integration.md` to understand integration patterns
+2. Reads `prompts/pprof_integration.md` to understand integration patterns
 3. Applies the appropriate integration based on detected framework
 4. Generates code changes for user review (no automatic PR)
 

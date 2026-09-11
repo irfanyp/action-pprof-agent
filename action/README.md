@@ -25,10 +25,10 @@ See [`examples/workflow.yml`](examples/workflow.yml) for a complete `workflow_di
 | `token` | yes | — | GitHub token used for checkout and creating the Pull Request. |
 | `ai_endpoint` | yes | — | Endpoint URL for the LLM. Passed to litellm as `api_base`. |
 | `ai_key` | yes | — | API key for the LLM endpoint. Also used as the bearer token for `SERVICE_URL` authentication. |
-| `ai_model` | no | `gamma4` | LLM model name to use. Unprefixed values target the self-hosted OpenAI-compatible endpoint at `ai_endpoint`; prefix with a litellm provider (e.g. `anthropic/...`) to target a native provider — see [AI_MODEL provider prefixes](#ai_model-provider-prefixes) below. |
-| `reference` | yes | — | User reference option: `low`, `med`, or `high`. Controls analysis depth/strictness. |
+| `ai_model` | no | `gamma4` | LLM model name. Unprefixed values target the self-hosted OpenAI-compatible endpoint at `ai_endpoint`; prefix with a litellm provider (e.g. `anthropic/...`) to target a native provider — see [below](#ai_model-provider-prefixes). |
+| `reference` | yes | — | Analysis depth: `low`, `med`, or `high`. |
 | `tags` | yes | — | Repository checkout branch/tag (git ref) to analyze. |
-| `analyzer_result_file` | no | `""` | Optional path to a raw pprof profile file for testing (file mode). |
+| `analyzer_result_file` | no | `""` | Optional path to a raw pprof profile file for testing (file mode). Skips SERVICE_URL trigger/poll/submit steps. |
 | `service_url` | no | `https://analyzer.internal/api/v1` | Base URL of the pprof analyzer service API. |
 | `base_branch` | no | `""` | Branch to open the Pull Request against. When unset, targets the repository's default branch. |
 
@@ -42,8 +42,6 @@ See [`examples/workflow.yml`](examples/workflow.yml) for a complete `workflow_di
 
 ## Flow
 
-The action runs a Python orchestration script that performs the following steps:
-
 1. **1a** — Trigger analyzer execution via SERVICE_URL. Returns a `run_id`.
 2. **1b** — Poll SERVICE_URL for the analyzer result. Convert raw pprof to markdown via `pprof-to-md`.
 3. **1c** — Verify git checkout is on the requested branch/tag.
@@ -56,46 +54,31 @@ The action runs a Python orchestration script that performs the following steps:
 10. **1j** — Create a new branch, commit, push, and open a Pull Request via `gh pr create`.
 11. **1k** — Flag the execution as submitted via SERVICE_URL.
 
-### Error Handling
-
-If any step 1b–1j fails, the script calls step 2a to flag the execution as error via SERVICE_URL.
+If any step 1b–1j fails, step 2a flags the execution as error via SERVICE_URL.
 
 ## AI_MODEL provider prefixes
 
-The LLM call goes through [litellm](https://github.com/BerriAI/litellm), which routes on a `provider/model` string convention. `AI_MODEL` values without a `/` are assumed to target the self-hosted OpenAI-compatible endpoint at `AI_ENDPOINT` and are auto-prefixed with `openai/`, so existing configurations keep working unchanged.
-
-To target a native provider API instead, prefix `AI_MODEL` with the matching litellm provider name:
+The LLM call goes through [litellm](https://github.com/BerriAI/litellm), which routes on a `provider/model` string convention. Unprefixed values are auto-prefixed with `openai/` and target `AI_ENDPOINT`.
 
 | `AI_MODEL` | Routes to |
 |---|---|
-| `gamma4` (unprefixed) | `AI_ENDPOINT`, OpenAI-compatible (default, unchanged behavior) |
+| `gamma4` (unprefixed) | `AI_ENDPOINT`, OpenAI-compatible (default) |
 | `anthropic/claude-3-5-sonnet-20241022` | Anthropic Messages API |
 | `bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0` | AWS Bedrock |
 | `vertex_ai/gemini-1.5-pro` | Google Vertex AI |
 
-**Troubleshooting:** `ai_endpoint` and `ai_key` are always required inputs, even when targeting a native provider. If the provider doesn't need them (e.g. it authenticates via its own SDK-level credentials/environment variables), set them to any non-empty placeholder — litellm ignores `api_base` for providers that resolve their own endpoint.
+`ai_endpoint` and `ai_key` are always required. For providers that don't use them (e.g. Anthropic with its own SDK credentials), set them to any non-empty placeholder.
 
 ## Testing / Local Mode
 
-For testing, you can bypass the SERVICE_URL analyzer service and supply a raw pprof profile directly using the `analyzer_result_file` input.
+Use the `analyzer_result_file` input to bypass the SERVICE_URL analyzer service and supply a raw pprof profile directly.
 
-See [`pprof_integration.md`](pprof_integration.md) for a guide on integrating pprof into your Go services.
+See [`pprof_integration.md`](../prompts/pprof_integration.md) for integrating pprof into your Go services.
 
 ## Prerequisites
 
-The composite action installs everything it needs:
+The composite action installs everything it needs: **pprof-to-md**, **Python 3.12**, **git**, and **gh CLI**.
 
-- **pprof-to-md** — Converts raw pprof profiles to markdown
-- **Python 3.12** — For the analyzer script
-- **git** — For patch operations
-- **gh CLI** — For PR creation
+## See Also
 
-## Quick Navigation
-
-- 📖 **Full Documentation** → See the main [`README.md`](../README.md)
-- 🧠 **Developer Guide** → See [`AGENTS.md`](../AGENTS.md)
-- 🚀 **Want a Local Skill Instead?** → See [`skill/README.md`](../skill/README.md)
-
----
-
-**For detailed architecture and development guidance, see [AGENTS.md](../AGENTS.md).**
+[`README.md`](../README.md) (project overview) · [`AGENTS.md`](../AGENTS.md) (developer/architecture guide) · [`skill/README.md`](../skill/README.md) (local skill alternative)

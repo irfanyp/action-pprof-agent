@@ -81,11 +81,11 @@ A handful of frameworks either ship their own native pprof toggle, or have no HT
 
 This plan can't enumerate every framework that exists, and a repo might use something not in the table above (a newer or niche router, an in-house wrapper, a framework this plan hasn't caught up to yet). Don't stall or guess wildly — fall back to this safe default procedure instead of skipping the task:
 
-1. **Confirm it's actually a long-running service first.** Re-run the Phase 0 grep for `ListenAndServe`/`.Run(`/`Serve(`/`mgr.Start`/`grpc.NewServer`. If nothing matches at all, treat it as a non-serving binary (last bullet in 0.2) rather than forcing an HTTP-shaped fix onto it.
-2. **If a listener exists but the framework is unrecognized**, inspect what's actually passed as the `Handler` to that listener call (or the object `.Run()`/`.Serve()` is a method on). Whatever it is — a custom in-house router, an unfamiliar third-party package, a struct that merely implements `http.Handler` — **the generic Phase 2 standalone server is always safe to apply regardless of what that handler is**, because it never touches the app's own router at all. This is the reason the standalone-server pattern was chosen as the default template throughout this plan: it doesn't require understanding the app's routing internals to be correct.
-3. **Apply the Phase 2 template as-is**, wire it into `main()` next to the unidentified framework's listener call (same placement rule as every other framework: right before the blocking `Serve`/`Run`/`ListenAndServe` call), and run the full Phase 5 validation checklist to confirm both that pprof works on the new port *and* that it did not attach to the main app's port (this second check matters even more here, precisely because the framework's own `DefaultServeMux` behavior is unknown).
-4. **Report the fallback explicitly.** State plainly in your output that the framework could not be identified against the known table, that the generic isolated-server fallback was used instead of a framework-native integration, and name the specific import paths / listener call that didn't match anything recognized — so a human reviewer knows to double check for a native pprof option this plan doesn't yet know about, and so this plan can be extended later.
-5. **Never silently do nothing.** An unidentified framework is a reason to fall back to the generic template with a flagged report, not a reason to skip the task or ask the person to identify it themselves first — proceed with the safe default and let them override if a better native option turns out to exist.
+1. **Confirm it's actually a long-running service:** re-run the Phase 0 grep for `ListenAndServe`/`.Run(`/`Serve(`/`mgr.Start`/`grpc.NewServer`. No matches → treat it as a non-serving binary (0.2's last bullet), not an HTTP-shaped fix.
+2. **If a listener exists but the framework is unrecognized**, inspect what's passed as `Handler` to that listener call (or the object `.Run()`/`.Serve()` is a method on). Whatever it is — in-house router, unfamiliar third-party package, bare `http.Handler` — **the generic Phase 2 standalone server is always safe**, since it never touches the app's own router. That's why the standalone-server pattern is this plan's default template throughout: it doesn't require understanding the app's routing internals to be correct.
+3. **Apply the Phase 2 template as-is**, wired into `main()` next to the unidentified listener call (same placement rule as every framework: right before the blocking `Serve`/`Run`/`ListenAndServe`), then run the full Phase 5 checklist to confirm pprof works on the new port *and* didn't attach to the main app's port — this second check matters even more here, since the framework's own `DefaultServeMux` behavior is unknown.
+4. **Report the fallback explicitly:** state that the framework couldn't be matched against the known table, that the generic isolated-server fallback was used instead of a framework-native integration, and name the specific import paths/listener call that didn't match — so a reviewer can check for a native pprof option this plan doesn't yet know about, and so the plan can be extended later.
+5. **Never silently do nothing.** An unidentified framework means falling back to the generic template with a flagged report — not skipping the task or waiting for someone to identify it first. Proceed with the safe default; let a human override if a better native option turns out to exist.
 
 ---
 
@@ -171,6 +171,8 @@ This block **never changes** across frameworks — it's plain `net/http`, so it 
 The only per-framework work is **where** you call `StartPprofServer()` — always in `main()` (or the bootstrap function), never inside a request handler. Below is what to look for and what to add, per framework.
 
 > **Note:** If Phase 0.2 flagged the repo as controller-runtime, go-zero, GoFr, beego, or a router-less gRPC/worker service, use the corresponding approach from 0.2 instead of the templates below — those either have a native pprof option or a genuinely different lifecycle shape. The templates below cover conventional HTTP-router frameworks. **If the framework doesn't match anything in the table at all, skip straight to the Phase 0.3 fallback** — don't force-fit one of the named templates onto an unrecognized router.
+>
+> **Same-port middleware warning:** echo, gin, fiber, and iris each ship their own pprof middleware that mounts on the *same* port/router as the app. Avoid it whenever a separate port is required — use the standalone `StartPprofServer()` below instead. Each framework's block below notes the specific middleware to avoid.
 
 ### Plain `net/http` / gorilla/mux / chi / httprouter / go-restful
 These all eventually call something like `http.ListenAndServe(addr, router)`. Add the pprof call just before that line:
@@ -202,10 +204,9 @@ func main() {
 	e.Logger.Fatal(e.Start(":8080"))
 }
 ```
-Do **not** use `echo`'s own pprof middleware (`github.com/labstack/echo-contrib/pprofwrapper` or similar) if the requirement is a *separate port* — that middleware mounts pprof onto the same echo instance/port. Prefer the standalone server above unless the task explicitly asks for same-port exposure.
+Avoid: `github.com/labstack/echo-contrib/pprofwrapper` (or similar) — mounts pprof on the same echo instance/port.
 
 ### gin
-Same reasoning as echo — `gin-contrib/pprof` mounts on the same router/port. For a separate port, use the standalone server:
 ```go
 func main() {
 	r := gin.Default()
@@ -217,9 +218,9 @@ func main() {
 	r.Run(":8080")
 }
 ```
+Avoid: `gin-contrib/pprof` — mounts on the same router/port.
 
 ### fiber (v2/v3)
-Fiber's built-in `middleware/pprof` also mounts on the same app/port. For isolation, use the standalone `net/http`-based server (fiber apps run on fasthttp, but that doesn't matter — the pprof server is a completely separate process-level listener):
 ```go
 func main() {
 	app := fiber.New()
@@ -231,9 +232,9 @@ func main() {
 	log.Fatal(app.Listen(":8080"))
 }
 ```
+Avoid: fiber's built-in `middleware/pprof` — mounts on the same app/port. (Fiber apps run on fasthttp, but that's irrelevant here — the pprof server is a completely separate process-level listener.)
 
 ### iris
-Same pattern as echo/gin — iris has its own optional pprof middleware that mounts on the same app/port; for a separate port, use the standalone server:
 ```go
 func main() {
 	app := iris.New()
@@ -245,6 +246,7 @@ func main() {
 	app.Listen(":8080")
 }
 ```
+Avoid: iris's own optional pprof middleware — mounts on the same app/port.
 
 ### buffalo
 Buffalo wraps gorilla/mux internally and typically starts via `app.Serve()`. Add the pprof call right before it, same as the gorilla/mux case:

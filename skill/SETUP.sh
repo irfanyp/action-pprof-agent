@@ -15,6 +15,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_INSTALL_DIR="${HOME}/.claude/skills"
+# pprof-analyzer/analyzer.py and pprof-integrator/coordinator.py resolve shared
+# prompt files via Path(__file__).resolve().parents[2] / "prompts" — once
+# installed at ~/.claude/skills/<skill>/, that resolves to ~/.claude/prompts.
+PROMPTS_INSTALL_DIR="${HOME}/.claude/prompts"
 
 # Colors for output
 RED='\033[0;31m'
@@ -111,6 +115,17 @@ install_skills() {
 
     log_info "✓ All skill files copied to $SKILLS_INSTALL_DIR"
 
+    # Copy shared prompt files (prompt_template.txt, pprof_integration.md, ...)
+    # that pprof-analyzer/pprof-integrator read relative to their installed location
+    if [ -d "$SCRIPT_DIR/prompts" ]; then
+        mkdir -p "$PROMPTS_INSTALL_DIR"
+        cp -r "$SCRIPT_DIR/prompts/." "$PROMPTS_INSTALL_DIR/"
+        log_info "  ✓ prompts/"
+        log_info "✓ Shared prompt files copied to $PROMPTS_INSTALL_DIR"
+    else
+        log_warn "prompts/ not found alongside SETUP.sh — pprof-analyzer/pprof-integrator will fail to find their guide files"
+    fi
+
     # Install Python dependencies
     log_info "Installing Python dependencies..."
 
@@ -153,6 +168,15 @@ uninstall_skills() {
         rm -rf "$SKILLS_INSTALL_DIR/$skill"
     done
 
+    # Remove only the prompt files we installed, not the entire directory —
+    # the user (or another tool) may have placed other files in $PROMPTS_INSTALL_DIR.
+    if [ -d "$SCRIPT_DIR/prompts" ]; then
+        for prompt_file in "$SCRIPT_DIR"/prompts/*; do
+            rm -f "$PROMPTS_INSTALL_DIR/$(basename "$prompt_file")"
+        done
+    fi
+    rmdir "$PROMPTS_INSTALL_DIR" 2>/dev/null || true
+
     log_info "✓ Skills uninstalled from $SKILLS_INSTALL_DIR"
     return 0
 }
@@ -175,6 +199,13 @@ verify_installation() {
             log_warn "Missing skill: ${skill} (expected ${skill}/SKILL.md)"
         fi
     done
+
+    # Check shared prompt files (read by pprof-analyzer/pprof-integrator at runtime)
+    if [ -f "$PROMPTS_INSTALL_DIR/prompt_template.txt" ] && [ -f "$PROMPTS_INSTALL_DIR/pprof_integration.md" ]; then
+        log_info "✓ Shared prompt files found: $PROMPTS_INSTALL_DIR"
+    else
+        log_warn "Missing shared prompt files in $PROMPTS_INSTALL_DIR (pprof-analyzer/pprof-integrator will fail to run)"
+    fi
 
     # Check Python dependencies
     python3 -c "import git" 2>/dev/null && {

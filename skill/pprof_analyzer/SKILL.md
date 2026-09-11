@@ -54,10 +54,7 @@ Analyzes the CPU profile at medium depth (top 3-5 hotspots, medium-effort fixes)
 
 ## Key Features
 
-✅ File-list based — Claude reads specific files on demand via its own `Read` tool, not a bulk upfront dump  
-✅ Full transparency — Complete prompt/response saved for debugging  
-✅ Patch validation — Ensures patches apply cleanly  
-✅ Zero credentials needed — Uses Claude Code's built-in Claude  
+✅ Zero credentials needed — Uses Claude Code's built-in Claude, no external LLM calls
 
 ## Prerequisites
 

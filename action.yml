@@ -108,7 +108,6 @@ runs:
     # kept up to date automatically by Dependabot (npm ecosystem, see
     # .github/dependabot.yml). Do NOT use `npm install -g` here — Dependabot
     # cannot track global installs.
-    # Note: repomix was removed (see agent-loop architecture in README.md).
     # ---------------------------------------------------------------------
     - name: Setup Node
       uses: actions/setup-node@v7

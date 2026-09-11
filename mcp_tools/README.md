@@ -1,17 +1,12 @@
 # MCP Server: pprof-analyzer
 
-An MCP (Model Context Protocol) server that exposes the four pprof-analyzer skills as tools, making them available to Claude Code, Claude Desktop, Cline, Cursor, and other MCP-native AI agents.
+An MCP server exposing the four pprof-analyzer skills as tools for Claude Code, Claude Desktop, Cline, Cursor, and other MCP-native AI agents.
 
 ## What is this?
 
-This MCP server wraps the four existing skills (`skill/`) without modification, exposing them as MCP tools:
+This server wraps the four existing skills (`skill/`) as five MCP tools — `analyze_pprof_profile_tool`, `build_pprof_analysis_prompt_tool`, `integrate_pprof_endpoint_tool`, `generate_load_test_tool`, `run_cpu_profile_tool` — without modifying them. See [Tool Reference](#tool-reference) below for parameters and behavior.
 
-1. **analyze_pprof_profile** — Analyze Go pprof CPU profiles and generate optimization patches
-2. **integrate_pprof_endpoint** — Add pprof endpoint integration guidance to a Go service
-3. **generate_load_test** — Generate load test scripts for Go services
-4. **run_cpu_profile** — Execute CPU profiling with concurrent load testing
-
-Unlike the GitHub Action (which makes external LLM API calls) or the Claude Code Skill (which is Claude Code-only), the MCP server works with any MCP-compatible agent host, including Claude Desktop, Cline, Cursor, and others.
+Unlike the GitHub Action (external LLM API calls) or the Claude Code Skill (Claude Code-only), it works with any MCP-compatible agent host.
 
 ## Installation
 
@@ -25,104 +20,61 @@ Unlike the GitHub Action (which makes external LLM API calls) or the Claude Code
 ### Setup
 
 ```bash
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-
-# Install dependencies
-pip install -r mcp_tools/requirements.txt
+make setup-env
 ```
 
 ## Testing Locally
 
-Run the test suite:
-
 ```bash
-pytest mcp_tools/tests/ -v
+make test-mcp                    # run the test suite
+mcp dev mcp_server.py            # launch MCP Inspector for manual testing
 ```
-
-Launch MCP Inspector for manual testing:
-
-```bash
-mcp dev mcp_tools/main.py
-```
-
-This opens an interactive MCP Inspector where you can call tools directly.
 
 ## Registration
 
 ### Claude Code
 
-Register the server with the local project:
-
 ```bash
 claude mcp add --transport stdio pprof-analyzer --scope project -- \
-  python3 $(pwd)/mcp_tools/main.py
+  python3 $(pwd)/mcp_server.py
 ```
 
 Tools will appear as:
-- `mcp__pprof-analyzer__analyze_pprof_profile`
-- `mcp__pprof-analyzer__integrate_pprof_endpoint`
-- `mcp__pprof-analyzer__generate_load_test`
-- `mcp__pprof-analyzer__run_cpu_profile`
+- `mcp__pprof-analyzer__analyze_pprof_profile_tool`
+- `mcp__pprof-analyzer__build_pprof_analysis_prompt_tool`
+- `mcp__pprof-analyzer__integrate_pprof_endpoint_tool`
+- `mcp__pprof-analyzer__generate_load_test_tool`
+- `mcp__pprof-analyzer__run_cpu_profile_tool`
 
-**Important:** Increase the timeout in `.claude/settings.json` for `run_cpu_profile`:
+**Important:** Increase the timeout in `.claude/settings.json` for `run_cpu_profile_tool`:
 
 ```json
 {
   "permissions": {
-    "mcp__pprof-analyzer__run_cpu_profile": {
+    "mcp__pprof-analyzer__run_cpu_profile_tool": {
       "timeout": 300000
     }
   }
 }
 ```
 
-### Claude Desktop
+### Claude Desktop / Cline / Cursor
 
-Edit `~/.claude_desktop/claude_desktop_config.json` (or `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
-
-```json
-{
-  "mcpServers": {
-    "pprof-analyzer": {
-      "command": "python3",
-      "args": ["/absolute/path/to/pprof-analyzer/mcp_tools/main.py"]
-    }
-  }
-}
-```
-
-Restart Claude Desktop to load the server.
-
-### Cline (VSCode Extension)
-
-Create `.cline_mcp_settings.json` in your project root:
-
-```json
-{
-  "mcpServers": {
-    "pprof-analyzer": {
-      "command": "python3",
-      "args": ["/absolute/path/to/pprof-analyzer/mcp_tools/main.py"]
-    }
-  }
-}
-```
+See [MCP_SETUP.md](../MCP_SETUP.md) for registration examples with `claude_desktop_config.json` and `.cline_mcp_settings.json`.
 
 ## Tool Reference
 
 | Tool | Parameters | Returns | Notes |
 |------|-----------|---------|-------|
-| `analyze_pprof_profile` | `profile_path: str`, `repo_path: str`, `reference_level: str = "med"` | Analysis prompt for LLM | Path-based; requires `profile_path`/`repo_path` to exist on the machine running the MCP server (local/stdio only) |
-| `build_pprof_analysis_prompt` | `analyzer_result: str`, `file_list: list[str]`, `reference_level: str = "med"` | Analysis prompt for LLM | Content-only, remote-safe variant of `analyze_pprof_profile` — see [MCP_SETUP.md](../MCP_SETUP.md#team-collaboration-httpsse) |
-| `integrate_pprof_endpoint` | `repo_path: str` | Integration guidance prompt | Returns prompt for pprof endpoint setup; set `PPROF_VERIFY_LOCAL_PATHS=false` server-side for remote callers |
-| `generate_load_test` | `repo_path: str`, `tool: str = "k6"` | Load test generation prompt | Tool choices: `k6`, `apache-bench`, `wrk`, `go`; same `PPROF_VERIFY_LOCAL_PATHS` note as above |
-| `run_cpu_profile` | `repo_path: str`, `port: int = 8080`, `load_cmd: str \| None`, `duration: int = 30` | Profile location + summary | ~30s typical latency, up to 120s+ for slow builds; disabled unless `MCP_ENABLE_CPU_PROFILE=1` is set on the server |
+| `analyze_pprof_profile_tool` | `profile_path: str`, `repo_path: str`, `reference_level: str = "med"` | Analysis prompt for LLM | Path-based; requires `profile_path`/`repo_path` to exist on the machine running the MCP server (local/stdio only) |
+| `build_pprof_analysis_prompt_tool` | `analyzer_result: str`, `file_list: list[str]`, `reference_level: str = "med"` | Analysis prompt for LLM | Content-only, remote-safe variant of `analyze_pprof_profile_tool` — see [MCP_SETUP.md](../MCP_SETUP.md#team-collaboration-httpsse) |
+| `integrate_pprof_endpoint_tool` | `repo_path: str` | Integration guidance prompt | Returns prompt for pprof endpoint setup; set `PPROF_VERIFY_LOCAL_PATHS=false` server-side for remote callers |
+| `generate_load_test_tool` | `repo_path: str`, `tool: str = "k6"` | Load test generation prompt | Tool choices: `k6`, `apache-bench`, `wrk`, `go`; same `PPROF_VERIFY_LOCAL_PATHS` note as above |
+| `run_cpu_profile_tool` | `repo_path: str`, `port: int = 8080`, `load_cmd: str \| None`, `duration: int = 30` | Profile location + summary | ~30s typical latency, up to 120s+ for slow builds; disabled unless `MCP_ENABLE_CPU_PROFILE=1` is set on the server |
 
 ## Concurrency Behavior
 
-The `run_cpu_profile` tool is guarded by a per-repo concurrency lock within a single server process:
+The `run_cpu_profile_tool` is guarded by a per-repo concurrency lock within a single server process:
 
 - Only one call per `repo_path` can run at a time
 - Overlapping calls for the same repo raise `RuntimeError` immediately
@@ -131,24 +83,17 @@ The `run_cpu_profile` tool is guarded by a per-repo concurrency lock within a si
 
 ## Troubleshooting
 
-**"Module not found" error:**
-Ensure the repository root is on `sys.path` so `skill/` and `mcp_tools/` can be imported.
-
-**`run_cpu_profile` timeouts:**
-Increase the timeout in your agent's configuration (e.g., 300 seconds for Claude Code).
-
-**Profile location issues:**
-Profiles are written to `.ai_output/cpu.prof` relative to the repo path, not the MCP server's working directory.
+| Problem | Fix |
+|---|---|
+| "Module not found" | Ensure the repository root is on `sys.path` so `skill/` and `mcp_tools/` can be imported |
+| `run_cpu_profile_tool` timeouts | Increase the timeout in your agent's configuration (e.g., 300 seconds for Claude Code) |
+| Profile location issues | Profiles are written to `.ai_output/cpu.prof` relative to the repo path, not the MCP server's working directory |
 
 ## Development
 
-### Running Tests
-
 ```bash
-pytest mcp_tools/tests/ -v
+make test-mcp    # all tests are mocked (no real skill scripts are called)
 ```
-
-All tests are mocked (no real skill scripts are called).
 
 ### Adding a New Tool
 
@@ -161,4 +106,5 @@ All tests are mocked (no real skill scripts are called).
 
 - [Root README](../README.md) — Overview of three implementations
 - [AGENTS.md](../AGENTS.md) — Architecture and design decisions
+- [MCP_SETUP.md](../MCP_SETUP.md) — Setup, Docker, and remote usage
 - [Skills documentation](../skill/) — Individual skill descriptions
