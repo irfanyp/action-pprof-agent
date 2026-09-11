@@ -25,6 +25,7 @@ pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 addopts = "-v --tb=short"
+asyncio_mode = "auto"
 
 [tool.pylance]
 pythonPath = "."
