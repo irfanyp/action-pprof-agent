@@ -3,6 +3,7 @@
 pprof-analyzer orchestration script.
 
 Implements the flow described in the action spec:
+  0   Pre-flight: verify AI endpoint is reachable (TCP connect check).
   1a  Trigger analyzer execution via SERVICE_URL.
   1b  Poll SERVICE_URL for the analyzer result.
   1c  Verify / prepare the git checkout branch.
@@ -76,6 +77,7 @@ class Config:
     SUMMARY_PATTERN = r"###\s*SUMMARY\s*\n(.*?)(?:###\s*PATCH|\Z)"
 
     STEP_DESCRIPTIONS: dict[str, str] = {
+        "0": "Pre-flight: verify AI endpoint reachable",
         "1a": "Trigger analyzer",
         "1b": "Poll analyzer result / convert pprof",
         "1c": "Prepare git checkout",
@@ -644,7 +646,7 @@ def validate_llm_endpoint(config: EnvConfig) -> None:
     host = parsed.hostname
     if not host:
         raise AnalyzerError(
-            "1f", f"Invalid AI endpoint URL (no host): {config.ai_endpoint}"
+            "0", f"Invalid AI endpoint URL (no host): {config.ai_endpoint}"
         )
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
@@ -655,11 +657,11 @@ def validate_llm_endpoint(config: EnvConfig) -> None:
             pass  # Connection succeeded — endpoint is reachable.
     except (socket.gaierror, OSError) as exc:
         raise AnalyzerError(
-            "1f",
+            "0",
             f"AI endpoint unreachable: {config.ai_endpoint} "
             f"(host={host}, port={port}) — {exc}",
         ) from exc
-    print(f"[1f] Pre-flight check passed: {host}:{port} is reachable.")
+    print(f"[0] Pre-flight check passed: {host}:{port} is reachable.")
 
 
 def call_llm(
@@ -1118,8 +1120,10 @@ def main() -> int:
     # connect check fails in ~10s instead.
     try:
         validate_llm_endpoint(config)
+        _record_step("0", "ok")
     except AnalyzerError as exc:
         _gh_annotation("error", exc.message, exc.step)
+        _record_step("0", "error")
         _write_step_summary("unknown")
         print(f"ERROR during pre-flight check: {exc.message}", file=sys.stderr)
         return 1
