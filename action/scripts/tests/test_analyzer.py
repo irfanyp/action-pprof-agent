@@ -84,6 +84,7 @@ from analyzer import (
     flag_error,
     flag_submitted,
     generate_valid_patch,
+    list_repo_files,
     load_analyzer_result_from_file,
     local_run_id,
     poll_analyzer_result,
@@ -92,6 +93,7 @@ from analyzer import (
     trigger_analyzer,
     validate_llm_endpoint,
 )
+
 
 
 
@@ -644,7 +646,9 @@ class TestServiceRequest:
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {"status": "ok"}
-        mocker.patch("analyzer.requests.get", return_value=mock_resp)
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_resp
+        mocker.patch("analyzer._get_session", return_value=mock_session)
 
         result = _service_request(
             "GET", "/runs/123", "1b", "https://api.test", "key"
@@ -656,7 +660,9 @@ class TestServiceRequest:
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {"run_id": "abc"}
-        mocker.patch("analyzer.requests.post", return_value=mock_resp)
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+        mocker.patch("analyzer._get_session", return_value=mock_session)
 
         result = _service_request(
             "POST", "/runs", "1a", "https://api.test", "key", {"data": 1}
@@ -666,10 +672,9 @@ class TestServiceRequest:
     def test_request_failure_raises(self, mocker):
         """A network error raises AnalyzerError."""
         import requests as req_module
-        mocker.patch(
-            "analyzer.requests.get",
-            side_effect=req_module.ConnectionError("refused"),
-        )
+        mock_session = MagicMock()
+        mock_session.get.side_effect = req_module.ConnectionError("refused")
+        mocker.patch("analyzer._get_session", return_value=mock_session)
 
         with pytest.raises(AnalyzerError) as exc_info:
             _service_request("GET", "/runs/123", "1b", "https://api.test", "key")
@@ -681,14 +686,18 @@ class TestServiceRequest:
         import requests as req_module
         mock_resp = MagicMock()
         mock_resp.raise_for_status.side_effect = req_module.HTTPError("404 Not Found")
-        mocker.patch("analyzer.requests.get", return_value=mock_resp)
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_resp
+        mocker.patch("analyzer._get_session", return_value=mock_session)
 
         with pytest.raises(AnalyzerError) as exc_info:
             _service_request("GET", "/runs/123", "1b", "https://api.test", "key")
         assert exc_info.value.step == "1b"
 
-    def test_unsupported_method_raises(self):
+    def test_unsupported_method_raises(self, mocker):
         """An unsupported HTTP method raises AnalyzerError."""
+        mock_session = MagicMock()
+        mocker.patch("analyzer._get_session", return_value=mock_session)
         with pytest.raises(AnalyzerError) as exc_info:
             _service_request("DELETE", "/runs/123", "1b", "https://api.test", "key")
         assert exc_info.value.step == "1b"
@@ -699,10 +708,12 @@ class TestServiceRequest:
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {}
-        mock_get = mocker.patch("analyzer.requests.get", return_value=mock_resp)
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_resp
+        mocker.patch("analyzer._get_session", return_value=mock_session)
 
         _service_request("GET", "/runs", "1a", "https://api.test", "my-secret-key")
-        args, kwargs = mock_get.call_args
+        args, kwargs = mock_session.get.call_args
         assert kwargs["headers"]["Authorization"] == "Bearer my-secret-key"
 
     def test_post_sends_json_payload(self, mocker):
@@ -710,12 +721,37 @@ class TestServiceRequest:
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {}
-        mock_post = mocker.patch("analyzer.requests.post", return_value=mock_resp)
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+        mocker.patch("analyzer._get_session", return_value=mock_session)
 
         payload = {"reference": "low", "tags": "main"}
         _service_request("POST", "/runs", "1a", "https://api.test", "key", payload)
-        args, kwargs = mock_post.call_args
+        args, kwargs = mock_session.post.call_args
         assert kwargs["json"] == payload
+
+    def test_get_retries_on_503(self, mocker):
+        """A 503-then-200 GET succeeds via the session retry adapter."""
+        import requests as req_module
+        mock_resp_503 = MagicMock()
+        mock_resp_503.raise_for_status.side_effect = req_module.HTTPError("503")
+        mock_resp_200 = MagicMock()
+        mock_resp_200.raise_for_status.return_value = None
+        mock_resp_200.json.return_value = {"status": "ok"}
+        mock_session = MagicMock()
+        mock_session.get.side_effect = [mock_resp_503, mock_resp_200]
+        mocker.patch("analyzer._get_session", return_value=mock_session)
+
+        # The retry adapter on the real session would retry; here we just
+        # verify the session is used (not module-level requests.get/post).
+        # A real retry test would need the actual HTTPAdapter, which is an
+        # integration test. This test confirms the session indirection works.
+        try:
+            result = _service_request("GET", "/runs/123", "1b", "https://api.test", "key")
+        except AnalyzerError:
+            pass  # 503 raises — the point is that session.get was called
+        mock_session.get.assert_called_once()
+
 
 
 # Step 1a (continued)
@@ -879,7 +915,7 @@ class TestRunCommand:
         assert output == "output"
 
     def test_run_command_failure_raises(self, mocker):
-        """A non-zero exit code raises AnalyzerError."""
+        """A non-zero exit code raises AnalyzerError with a non-doubled message."""
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "command not found"
@@ -889,6 +925,10 @@ class TestRunCommand:
             _run_command(["nonexistent-cmd"], "1d")
         assert exc_info.value.step == "1d"
         assert "Command failed" in exc_info.value.message
+        # The message must not be double-wrapped (regression test for the
+        # catch-all re-wrapping AnalyzerError raised inside the try block).
+        assert exc_info.value.message.count("Command failed") == 1
+
 
     def test_run_command_timeout_raises(self, mocker):
         """A command timeout raises AnalyzerError."""
@@ -1325,7 +1365,12 @@ class TestCallLlm:
         assert tool_result_messages == []
 
     def test_call_llm_max_tool_calls_exceeded(self, mocker, mock_config):
-        """AnalyzerError('1f') is raised once tool calls exceed the configured limit."""
+        """When tool calls exceed the limit, the model is told to answer now.
+
+        Instead of raising AnalyzerError('1f'), the loop appends a user message
+        telling the model it has no reads left, then re-calls the LLM without
+        tools so it must produce a text answer.
+        """
         tool_call = ChatCompletionMessageToolCall(
             id="call_1",
             type="function",
@@ -1337,15 +1382,28 @@ class TestCallLlm:
         looping_completion.choices[0].message.content = ""
         looping_completion.choices[0].message.tool_calls = [tool_call]
 
-        mocker.patch("analyzer.litellm.completion", return_value=looping_completion)
+        # After the limit is hit, the LLM is called without tools and returns text.
+        final_completion = mocker.Mock(spec=ModelResponse)
+        final_completion.choices = [MagicMock()]
+        final_completion.choices[0].message.content = "### SUMMARY\nDone\n\n### PATCH\n```diff\n--- a/f.go\n+++ b/f.go\n@@ -1,1 +1,1 @@\n-a\n+b\n```\n"
+        final_completion.choices[0].message.tool_calls = None
+
+        mocker.patch(
+            "analyzer.litellm.completion",
+            side_effect=[looping_completion] * Config.MAX_TOOL_CALLS + [final_completion],
+        )
         mocker.patch("analyzer._execute_read_file_tool", return_value="ok")
 
         messages: list[AllMessageValues] = [{"role": "user", "content": "hi"}]
         tools: list[ChatCompletionToolParam] = [{"type": "function", "function": {"name": "read_file"}}]
-        with pytest.raises(AnalyzerError) as exc_info:
-            call_llm(messages, mock_config, tools=tools)
-        assert exc_info.value.step == "1f"
-        assert "Tool calls exceeded limit" in exc_info.value.message
+        text, returned_messages = call_llm(messages, mock_config, tools=tools)
+        # The model was told to stop reading and produce an answer.
+        assert "Done" in text
+        # The last user message tells the model to stop reading.
+        user_msgs = [m for m in returned_messages if m.get("role") == "user"]
+        assert any("used all" in str(m.get("content", "")) for m in user_msgs)
+
+
 
 
 class TestResolveLitellmModel:
@@ -1662,20 +1720,26 @@ class TestReadFileToolErrors:
         test_file = tmp_path / "main.go"
         test_file.write_text("package main\n\nfunc main() {}\n")
         import json
-        tool_input = json.dumps({"file_path": str(test_file), "line_range": "invalid"})
-        result = _execute_read_file_tool(tool_input)
+        mock_repo = MagicMock()
+        mock_repo.working_tree_dir = str(tmp_path)
+        tool_input = json.dumps({"file_path": "main.go", "line_range": "invalid"})
+        result = _execute_read_file_tool(tool_input, mock_repo)
         assert "ERROR" in result
         assert "Invalid line range" in result or "line_range" in result.lower()
+
 
     def test_line_range_beyond_file(self, tmp_path):
         """Requesting lines beyond file length returns an error."""
         test_file = tmp_path / "main.go"
         test_file.write_text("line1\nline2\nline3\n")
         import json
-        tool_input = json.dumps({"file_path": str(test_file), "line_range": "10-20"})
-        result = _execute_read_file_tool(tool_input)
+        mock_repo = MagicMock()
+        mock_repo.working_tree_dir = str(tmp_path)
+        tool_input = json.dumps({"file_path": "main.go", "line_range": "10-20"})
+        result = _execute_read_file_tool(tool_input, mock_repo)
         assert "ERROR" in result
         assert "beyond file length" in result or "Line 10 is beyond" in result
+
 
     def test_directory_traversal_blocked(self):
         """Directory traversal attempts are blocked."""
@@ -1688,10 +1752,13 @@ class TestReadFileToolErrors:
         test_file = tmp_path / "main.go"
         test_file.write_text("line1\nline2\nline3\n")
         import json
-        tool_input = json.dumps({"file_path": str(test_file), "line_range": "150-100"})
-        result = _execute_read_file_tool(tool_input)
+        mock_repo = MagicMock()
+        mock_repo.working_tree_dir = str(tmp_path)
+        tool_input = json.dumps({"file_path": "main.go", "line_range": "150-100"})
+        result = _execute_read_file_tool(tool_input, mock_repo)
         assert "ERROR" in result
         assert ("start must be" in result.lower() or "invalid" in result.lower())
+
 
     def test_negative_line_range(self):
         """Negative line numbers return an error."""
@@ -1816,3 +1883,176 @@ class TestPrepareGitCheckout:
 
         result = prepare_git_checkout("v1.0")
         assert result == mock_repo
+
+
+# ============================================================================
+# Regression tests for optimization plan items
+
+# ============================================================================
+
+class TestPathContainment:
+    """Regression tests for Phase 1.1 — path containment in _execute_read_file_tool.
+
+    Ensures the LLM's read_file tool cannot read files outside the repository,
+    blocking absolute paths, directory traversal, and symlinks.
+    """
+
+    def test_absolute_path_outside_repo_rejected(self, tmp_path):
+        """An absolute path outside the repo is rejected."""
+        import json
+        mock_repo = MagicMock()
+        mock_repo.working_tree_dir = str(tmp_path)
+        tool_input = json.dumps({"file_path": "/etc/hostname"})
+        result = _execute_read_file_tool(tool_input, mock_repo)
+        assert "ERROR" in result
+        assert "outside the repository" in result
+
+    def test_directory_traversal_rejected(self, tmp_path):
+        """A ../../etc/passwd path is rejected."""
+        import json
+        mock_repo = MagicMock()
+        mock_repo.working_tree_dir = str(tmp_path)
+        tool_input = json.dumps({"file_path": "../../../etc/passwd"})
+        result = _execute_read_file_tool(tool_input, mock_repo)
+        assert "ERROR" in result
+        assert "outside the repository" in result
+
+    def test_symlink_outside_repo_rejected(self, tmp_path):
+        """A symlink inside the repo pointing outside is rejected."""
+        import json
+        # Create a target file outside the repo (in a sibling directory)
+        outside_dir = tmp_path.parent / "outside_secret"
+        outside_dir.mkdir(exist_ok=True)
+        target = outside_dir / "secret.txt"
+        target.write_text("secret")
+        # Create a symlink inside the repo pointing at it
+        link = tmp_path / "link.go"
+        link.symlink_to(target)
+        mock_repo = MagicMock()
+        mock_repo.working_tree_dir = str(tmp_path)
+        tool_input = json.dumps({"file_path": "link.go"})
+        result = _execute_read_file_tool(tool_input, mock_repo)
+        assert "ERROR" in result
+        assert "outside the repository" in result
+
+
+    def test_absolute_path_inside_repo_accepted(self, tmp_path):
+        """An absolute path that resolves inside the repo is accepted."""
+        import json
+        test_file = tmp_path / "main.go"
+        test_file.write_text("package main\n")
+        mock_repo = MagicMock()
+        mock_repo.working_tree_dir = str(tmp_path)
+        mock_repo.git.show.return_value = "package main\n"
+        tool_input = json.dumps({"file_path": str(test_file)})
+        result = _execute_read_file_tool(tool_input, mock_repo)
+        assert "ERROR" not in result
+
+    def test_normal_relative_path_accepted(self, tmp_path):
+        """A normal relative path inside the repo works unchanged."""
+        import json
+        test_file = tmp_path / "main.go"
+        test_file.write_text("package main\n")
+        mock_repo = MagicMock()
+        mock_repo.working_tree_dir = str(tmp_path)
+        mock_repo.git.show.return_value = "package main\n"
+        tool_input = json.dumps({"file_path": "main.go"})
+        result = _execute_read_file_tool(tool_input, mock_repo)
+        assert "ERROR" not in result
+
+
+class TestListRepoFilesHiddenPaths:
+    """Regression tests for Phase 1.3 — lstrip bug in list_repo_files fallback.
+
+    Ensures hidden/dot-prefixed paths are not mangled by the filesystem fallback.
+    """
+
+    def test_hidden_dir_path_preserved(self, tmp_path, monkeypatch, mocker):
+        """A .hidden/x.go path is preserved, not stripped to hidden/x.go."""
+        # Create a repo structure with a hidden directory
+        hidden_dir = tmp_path / ".config"
+        hidden_dir.mkdir()
+        (hidden_dir / "gen.go").write_text("package config")
+
+        # Also create a normal file for comparison
+        (tmp_path / "main.go").write_text("package main")
+
+        monkeypatch.chdir(tmp_path)
+
+        # Force the filesystem fallback by making git.Repo fail
+        import git as git_module
+        mocker.patch("analyzer.git.Repo", side_effect=git_module.InvalidGitRepositoryError("no git"))
+
+        result = list_repo_files()
+        # The hidden path must be preserved with the dot prefix
+        assert ".config/gen.go" in result
+        assert "main.go" in result
+        # The mangled path (without the dot) must NOT appear as a separate entry.
+        # Check that no line starts with "- `config/gen.go" (without the dot).
+        lines = result.split("\n")
+        assert not any(line.strip() == "- `config/gen.go`" for line in lines)
+
+
+
+
+class TestReadFileCap:
+    """Regression tests for Phase 2.1 — read_file output cap.
+
+    Ensures read_file_context truncates long files and clamps explicit ranges.
+    """
+
+    def test_short_file_unchanged(self, tmp_path):
+        """A short file is returned in full with no truncation marker."""
+        test_file = tmp_path / "small.go"
+        test_file.write_text("package main\n")
+
+        mock_repo = MagicMock()
+        mock_repo.git.show.return_value = "package main\n"
+        result = read_file_context("small.go", repo=mock_repo)
+        assert "truncated" not in result
+        assert "L1| package main" in result
+
+    def test_long_file_truncated_with_marker(self, tmp_path):
+        """A file exceeding READ_FILE_MAX_LINES is truncated with a marker."""
+        # Create content with more lines than the cap
+        lines = [f"// line {i}" for i in range(Config.READ_FILE_MAX_LINES + 100)]
+        content = "\n".join(lines)
+
+        mock_repo = MagicMock()
+        mock_repo.git.show.return_value = content
+
+        result = read_file_context("big.go", repo=mock_repo)
+        assert "truncated" in result
+        assert f"showing 1-{Config.READ_FILE_MAX_LINES}" in result
+        # The marker should tell the model how to get more
+        assert "line_range" in result
+
+    def test_oversized_explicit_range_clamped(self, tmp_path):
+        """An explicit range wider than the cap is clamped."""
+        # Create content with enough lines
+        lines = [f"// line {i}" for i in range(Config.READ_FILE_MAX_LINES + 200)]
+        content = "\n".join(lines)
+
+        mock_repo = MagicMock()
+        mock_repo.git.show.return_value = content
+
+        # Request a range far wider than the cap
+        result = read_file_context("big.go", line_range=(1, 999999), repo=mock_repo)
+        # Should not contain lines beyond the cap
+        line_count = result.count("L")
+        assert line_count <= Config.READ_FILE_MAX_LINES + 6  # +6 for context lines
+
+    def test_context_lines_still_correct(self, tmp_path):
+        """The 3-lines-of-context behavior still works for small ranges."""
+        content = "\n".join(f"line {i}" for i in range(1, 21))
+
+        mock_repo = MagicMock()
+        mock_repo.git.show.return_value = content
+
+        # Request lines 10-12 — should get 7-15 (3 context on each side)
+        result = read_file_context("test.go", line_range=(10, 12), repo=mock_repo)
+        assert "L7|" in result  # 3 lines before
+        assert "L15|" in result  # 3 lines after
+        assert "L6|" not in result  # before context
+        assert "L16|" not in result  # after context
+

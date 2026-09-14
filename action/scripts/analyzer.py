@@ -2,22 +2,11 @@
 """
 pprof-analyzer orchestration script.
 
-Implements the flow described in the action spec:
-  0   Pre-flight: verify AI endpoint is reachable (TCP connect check).
-  1a  Trigger analyzer execution via SERVICE_URL.
-  1b  Poll SERVICE_URL for the analyzer result.
-  1c  Verify / prepare the git checkout branch.
-  1d  Generate file list for repo (repomix replaced by agent-loop file access).
-  1e  Construct the prompt.
-  1f  Feed the prompt to the LLM (with tool-use enabled for file access).
-  1g  Extract the git patch from the LLM result.
-  1h  Apply the git patch.
-  1i  (Artifacts are written to ./artifacts; the composite action uploads them.)
-  1j  Commit, push, and create a Pull Request.
-  1k  Flag the execution as submitted via SERVICE_URL.
-
+Orchestrates the GitHub Action flow: trigger → poll → convert → prompt → LLM
+→ extract patch → apply → PR. See Config.STEP_DESCRIPTIONS for the step list.
 If any step 1b-1j fails, step 2a flags the execution as error via SERVICE_URL.
 """
+
 
 from __future__ import annotations
 
@@ -36,8 +25,11 @@ from urllib.parse import urlparse
 
 import git
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 import litellm
+
 from litellm.types.llms.openai import (
     AllMessageValues,
     ChatCompletionAssistantMessage,
@@ -69,7 +61,17 @@ class Config:
     # failure is fed back to the LLM for a corrective regeneration.
     MAX_PATCH_ATTEMPTS = 2
 
+    # Maximum lines returned by a single read_file tool call. Prevents a
+    # single huge file from blowing the model's context window mid-loop.
+    READ_FILE_MAX_LINES = 800
+
+    # Maximum number of read_file tool calls allowed in a single LLM agent
+    # loop before the model is told to stop reading and produce an answer.
+    MAX_TOOL_CALLS = 10
+
     ARTIFACTS_DIR = Path("artifacts")
+
+
 
     VALID_REFERENCES = {"low", "med", "high"}
 
@@ -166,6 +168,30 @@ class EnvConfig:
 # Tracks the status of each step: "ok", "error", or absent (not run yet).
 STEP_RESULTS: dict[str, str] = {}
 
+# Module-level lazily-created requests.Session. Reuses one connection (with
+# keep-alive) across all SERVICE_URL calls instead of a fresh TLS handshake
+# per request. GETs get automatic retries on 502/503/504; POSTs do not (to
+# avoid creating duplicate analyzer runs).
+_session: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    """Return the module-level requests.Session, creating it on first use."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        retry_adapter = HTTPAdapter(
+            max_retries=Retry(
+                total=3,
+                backoff_factor=1,
+                status_forcelist=[502, 503, 504],
+                allowed_methods=["GET"],
+            )
+        )
+        _session.mount("https://", retry_adapter)
+        _session.mount("http://", retry_adapter)
+    return _session
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -180,6 +206,10 @@ def _service_request(
     payload: dict | None = None,
 ) -> dict:
     """Make authenticated request to SERVICE_URL, raising AnalyzerError on failure.
+
+    Uses a shared requests.Session for connection reuse. GETs are retried
+    automatically on 502/503/504; POSTs are not retried (to avoid duplicate
+    side effects like creating two analyzer runs).
 
     Args:
         method: HTTP method ("GET", "POST")
@@ -200,12 +230,13 @@ def _service_request(
         "Authorization": f"Bearer {ai_key}",
         "Content-Type": "application/json",
     }
+    session = _get_session()
 
     try:
         if method.upper() == "GET":
-            resp = requests.get(url, headers=headers, timeout=Config.REQUEST_TIMEOUT_SECONDS)
+            resp = session.get(url, headers=headers, timeout=Config.REQUEST_TIMEOUT_SECONDS)
         elif method.upper() == "POST":
-            resp = requests.post(
+            resp = session.post(
                 url, headers=headers, json=payload, timeout=Config.REQUEST_TIMEOUT_SECONDS
             )
         else:
@@ -215,6 +246,7 @@ def _service_request(
         return resp.json()
     except requests.RequestException as exc:
         raise AnalyzerError(step, f"Request to {endpoint} failed: {exc}") from exc
+
 
 
 def _run_command(
@@ -244,10 +276,13 @@ def _run_command(
         if result.returncode != 0:
             raise AnalyzerError(step, f"{prefix_msg}Command failed: {result.stderr}")
         return result.stdout
+    except AnalyzerError:
+        raise
     except subprocess.TimeoutExpired as exc:
         raise AnalyzerError(step, f"{prefix_msg}Command timeout: {' '.join(cmd[:2])} took >{timeout}s") from exc
     except Exception as exc:
         raise AnalyzerError(step, f"{prefix_msg}Command failed: {exc}") from exc
+
 
 
 def _ensure_artifacts_dir() -> None:
@@ -317,18 +352,13 @@ def _write_step_summary(run_id: str) -> None:
 def _node_bin(name: str, action_path: Path) -> str:
     """Resolve an npm-installed CLI binary from the action's local node_modules.
 
-    The composite action runs ``npm ci`` in ``${ACTION_PATH}/action`` (see action.yml),
-    which installs ``pprof-to-md`` into ``${ACTION_PATH}/action/node_modules/.bin``.
-    This helper returns the absolute path to the requested binary so the analyzer
-    can invoke the exact pinned version regardless of the current working directory
-    or global PATH.
-
-    Using the local binary (instead of ``npx --yes <pkg>``) avoids a network
-    re-resolve at runtime and guarantees the version pinned in
+    Using the local pinned binary (instead of ``npx``) avoids a network
+    re-resolve at runtime and guarantees the version from
     ``action/package-lock.json`` is the one that runs.
     """
     candidate = action_path / "action" / "node_modules" / ".bin" / name
     return str(candidate)
+
 
 
 def _decode_pprof_result(result: str) -> Path:
@@ -399,11 +429,17 @@ def list_repo_files(repo: git.Repo | None = None) -> str:
             dirs[:] = [d for d in dirs if d not in {'.git', 'vendor', 'node_modules', '.github', 'build', 'dist'}]
             for f in filenames:
                 if f.endswith('.go'):
-                    path = os.path.join(root, f).lstrip('./')
+                    path = os.path.relpath(os.path.join(root, f), '.')
                     files.append(path)
+
 
     files.sort()
     return "\n".join(f"- `{f}`" for f in files)
+
+
+# Cache of file contents (keyed by path) to avoid repeated `git show` subprocesses
+# when the LLM re-requests the same file at a different line range. Scoped to the run.
+_file_content_cache: dict[str, str] = {}
 
 
 def read_file_context(file_path: str, line_range: tuple[int, int] | None = None, repo: git.Repo | None = None) -> str:
@@ -421,30 +457,34 @@ def read_file_context(file_path: str, line_range: tuple[int, int] | None = None,
         if repo is None:
             repo = git.Repo(os.getcwd())
 
-        content = None
-        source = None
-
-        # Try to read from git first (most reliable in CI)
-        try:
-            content = repo.git.show(f"HEAD:{file_path}")
-            source = "git"
-        except git.GitCommandError as e:
-            # Fall back to filesystem
-            if not os.path.exists(file_path):
-                return f"ERROR: File not found in HEAD or filesystem: {file_path}"
+        # Check the content cache first to avoid a repeated `git show` subprocess.
+        if file_path in _file_content_cache:
+            content = _file_content_cache[file_path]
+        else:
+            content = None
+            # Try to read from git first (most reliable in CI)
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                source = "filesystem"
-            except UnicodeDecodeError:
-                return f"ERROR: File is binary or has invalid encoding: {file_path}"
-            except PermissionError:
-                return f"ERROR: Permission denied reading file: {file_path}"
-            except IOError as io_err:
-                return f"ERROR: Cannot read file: {file_path} ({io_err})"
+                content = repo.git.show(f"HEAD:{file_path}")
+            except git.GitCommandError:
+                # Fall back to filesystem
+                if not os.path.exists(file_path):
+                    return f"ERROR: File not found in HEAD or filesystem: {file_path}"
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                except UnicodeDecodeError:
+                    return f"ERROR: File is binary or has invalid encoding: {file_path}"
+                except PermissionError:
+                    return f"ERROR: Permission denied reading file: {file_path}"
+                except IOError as io_err:
+                    return f"ERROR: Cannot read file: {file_path} ({io_err})"
+
+            if content is not None:
+                _file_content_cache[file_path] = content
 
         if content is None:
             return f"ERROR: File not found: {file_path}"
+
 
         # Handle both LF and CRLF line endings consistently
         lines = content.splitlines()
@@ -461,17 +501,32 @@ def read_file_context(file_path: str, line_range: tuple[int, int] | None = None,
 
             start = max(1, start - 3)  # Include 3 lines of context before
             end = min(len(lines), end + 3)  # Include 3 lines of context after
+            # Clamp the range to the max-lines cap so "1-999999" can't bypass it.
+            if end - start + 1 > Config.READ_FILE_MAX_LINES:
+                end = start + Config.READ_FILE_MAX_LINES - 1
             lines = lines[start - 1:end]
             start_line = start
         else:
             start_line = 1
+
+        # Cap the total lines returned to prevent blowing the model's context window.
+        truncated_marker = ""
+        if len(lines) > Config.READ_FILE_MAX_LINES:
+            total_lines = len(lines)
+            lines = lines[:Config.READ_FILE_MAX_LINES]
+            truncated_marker = (
+                f"\n... [truncated: file has {total_lines} lines, showing 1-"
+                f"{Config.READ_FILE_MAX_LINES}. Request a specific line_range "
+                f'(e.g. "{Config.READ_FILE_MAX_LINES + 1}-{Config.READ_FILE_MAX_LINES * 2}") to see more.]'
+            )
 
         result = []
         for i, line in enumerate(lines, start=start_line):
             # Format: "L{line_num}| {content}" to make it clearer for LLM to parse
             result.append(f"L{i}| {line}")
 
-        return "\n".join(result)
+        return "\n".join(result) + truncated_marker
+
     except Exception as e:
         return f"ERROR: Failed to read {file_path}: {e}"
 
@@ -510,6 +565,10 @@ def poll_analyzer_result(run_id: str, config: EnvConfig) -> Path:
     """
     deadline = time.time() + Config.POLL_TIMEOUT_SECONDS
     last_status = None
+    # Start at 2s and back off ×1.5 up to the 15s ceiling. Same worst case,
+    # meaningfully faster for quick runs.
+    interval = 2.0
+    max_interval = float(Config.POLL_INTERVAL_SECONDS)
 
     while time.time() < deadline:
         data = _service_request("GET", f"/runs/{run_id}", "1b", config.service_url, config.ai_key)
@@ -528,9 +587,15 @@ def poll_analyzer_result(run_id: str, config: EnvConfig) -> Path:
         if status == "error":
             raise AnalyzerError("1b", f"Analyzer reported error: {data}")
 
-        time.sleep(Config.POLL_INTERVAL_SECONDS)
+        # Clamp the final sleep so the loop never overshoots the deadline.
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        time.sleep(min(interval, remaining))
+        interval = min(interval * 1.5, max_interval)
 
     raise AnalyzerError("1b", f"Timed out after {Config.POLL_TIMEOUT_SECONDS}s waiting for run {run_id}")
+
 
 
 # ---------------------------------------------------------------------------
@@ -622,25 +687,15 @@ def _resolve_litellm_model(ai_model: str) -> str:
 
 
 def validate_llm_endpoint(config: EnvConfig) -> None:
-    """Quick pre-flight TCP connectivity check on the AI endpoint.
+    """Pre-flight TCP connectivity check on the AI endpoint.
 
-    Opens a TCP connection to the endpoint's host:port with a short timeout.
-    Catches wrong hostname (DNS failure), wrong port (connection refused),
-    and service down (connection refused/timeout) — all within
-    ``Config.LLM_ENDPOINT_CONNECT_TIMEOUT_SECONDS`` seconds — *before*
-    litellm is ever called, so a misconfigured endpoint fails in seconds
-    instead of waiting for litellm's retry/timeout cycle (which previously
-    took up to 20 minutes).
-
-    This check is provider-agnostic: it only verifies that *something* is
-    listening at the endpoint URL. It does not validate the API key or model
-    name — those are left to litellm, which fails fast on auth/model errors
-    (non-retryable HTTP 4xx) rather than timing out.
+    Fails fast (~10s) on DNS/connection errors before litellm's retry cycle.
+    Does not validate the API key or model name — those are left to litellm.
 
     Raises:
-        AnalyzerError: If the endpoint host cannot be resolved or the TCP
-            connection cannot be established within the timeout.
+        AnalyzerError: If the endpoint is unreachable within the timeout.
     """
+
     parsed = urlparse(config.ai_endpoint)
 
     host = parsed.hostname
@@ -680,10 +735,10 @@ def call_llm(
     print(f"[1f] Calling LLM (model={model})...")
 
     tool_calls_made = 0
-    max_tool_calls = 10
 
     while True:
         kwargs: dict = {
+
             "model": model,
             "messages": messages,
             "temperature": 0.2,
@@ -697,12 +752,11 @@ def call_llm(
         if tools:
             kwargs["tools"] = tools
         completion = litellm.completion(**kwargs)
-        # litellm.completion() is typed to return `ModelResponse | CustomStreamWrapper`
-        # because the function also handles stream=True calls. We never pass
-        # stream=True, so this always holds at runtime; the assert narrows the
-        # type for Pylance so `.choices` type-checks (CustomStreamWrapper has no
-        # `.choices` attribute).
-        assert isinstance(completion, ModelResponse)
+        # narrows for Pylance — litellm.completion() can also return
+        # CustomStreamWrapper (stream=True), which we never use.
+        if not isinstance(completion, ModelResponse):
+            raise AnalyzerError("1f", "LLM returned unexpected response type.")
+
 
         assistant_message = completion.choices[0].message
 
@@ -767,8 +821,25 @@ def call_llm(
             })
 
         tool_calls_made += len(tool_calls)
-        if tool_calls_made > max_tool_calls:
-            raise AnalyzerError("1f", f"Tool calls exceeded limit ({max_tool_calls}). LLM may be in an infinite loop.")
+        if tool_calls_made >= Config.MAX_TOOL_CALLS:
+            # Tell the model it has no reads left and must answer now, rather
+            # than raising and losing the whole run.
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"You have used all {Config.MAX_TOOL_CALLS} read_file calls. "
+                    "Stop reading files and produce your SUMMARY and PATCH now."
+                ),
+            })
+            # Re-call the LLM without tools so it must produce a text answer.
+            kwargs.pop("tools", None)
+            completion = litellm.completion(**kwargs)
+            if not isinstance(completion, ModelResponse):
+                raise AnalyzerError("1f", "LLM returned unexpected response type after tool-call limit.")
+            text = completion.choices[0].message.content or ""
+            print(f"[1f] LLM returned {len(text)} chars (after tool-call limit).")
+            return text, messages
+
 
 
 
@@ -782,8 +853,6 @@ def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> st
 
     Returns error message if the tool input is invalid or file cannot be read.
     """
-    import json
-
     try:
         # Parse JSON arguments from the LLM
         if isinstance(tool_input, str):
@@ -800,9 +869,22 @@ def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> st
         if not file_path:
             return "ERROR: No file_path provided. Use 'file_path' key in arguments."
 
-        # Validate file_path is not trying to escape directory
-        if ".." in file_path:
-            return f"ERROR: Invalid file path '{file_path}' — directory traversal not allowed"
+        # Validate file_path is contained within the repository working tree.
+        # Path.resolve() follows symlinks, so this also blocks a symlink inside
+        # the repo pointing at /etc/shadow. An absolute path that *is* inside
+        # the repo still resolves fine.
+        wt_dir = repo.working_tree_dir if repo else os.getcwd()
+        if wt_dir is None:
+            return "ERROR: Cannot determine repository root — not allowed."
+        repo_root = Path(wt_dir).resolve()
+        try:
+            candidate = (repo_root / file_path).resolve()
+            candidate.relative_to(repo_root)  # raises ValueError if outside
+        except (ValueError, OSError):
+            return f"ERROR: Path '{file_path}' is outside the repository — not allowed."
+        # Pass the validated repo-relative path so the `git show HEAD:<path>` branch keeps working.
+        file_path = candidate.relative_to(repo_root).as_posix()
+
 
         # Parse line_range if provided as string "100-150"
         line_range: tuple[int, int] | None = None
@@ -819,10 +901,11 @@ def _execute_read_file_tool(tool_input: str, repo: git.Repo | None = None) -> st
         result = read_file_context(file_path, line_range, repo)
         return result
 
+
     except Exception as e:
         # Return detailed error messages to help LLM correct its requests
-        import traceback
         error_msg = str(e)
+
         if "not found" in error_msg.lower() or "no such file" in error_msg.lower():
             return f"ERROR: File not found: {tool_input}. Please check the file path and try again."
         elif "permission" in error_msg.lower():
@@ -952,7 +1035,16 @@ def generate_valid_patch(prompt: str, config: EnvConfig, repo: git.Repo | None =
             print(f"[1g] Attempt {attempt}/{Config.MAX_PATCH_ATTEMPTS}: {last_error}")
 
         if attempt < Config.MAX_PATCH_ATTEMPTS:
-            messages = final_messages
+            # call_llm mutates the messages list in place and returns the same
+            # object, so `final_messages` is `messages` — no copy needed.
+            # Before the retry, replace bulky tool-result messages from the
+            # previous attempt with a short placeholder so attempt 2 doesn't
+            # re-send the entire file contents the model already summarized.
+            for msg in messages:
+                if msg.get("role") == "tool":
+                    msg["content"] = (
+                        "[previous read_file result elided; call read_file again if you need it]"
+                    )
             messages.append({
                 "role": "user",
                 "content": (
@@ -962,6 +1054,7 @@ def generate_valid_patch(prompt: str, config: EnvConfig, repo: git.Repo | None =
                     "fixing the issue. Use the read_file tool again if needed to verify line numbers."
                 ),
             })
+
 
     raise AnalyzerError(
         "1h",
@@ -975,8 +1068,10 @@ def generate_valid_patch(prompt: str, config: EnvConfig, repo: git.Repo | None =
 
 def apply_patch(repo: git.Repo, patch: str) -> None:
     """Apply the unified-diff patch via `git apply`."""
+    _ensure_artifacts_dir()
     patch_file = Config.ARTIFACTS_DIR / "patch.diff"
     patch_file.write_text(patch + "\n", encoding="utf-8")
+
     print(f"[1h] Applying patch from {patch_file}")
     _run_command(
         ["git", "apply", "--whitespace=fix", str(patch_file)],
@@ -1105,7 +1200,32 @@ def flag_error(run_id: str, step: str, message: str, config: EnvConfig) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def _fail(
+    step: str,
+    message: str,
+    run_id: str | None,
+    config: EnvConfig,
+    file_mode: bool,
+) -> int:
+    """Handle a fatal error: annotate, record, summarize, flag, and return exit code.
+
+    Consolidates the three near-identical failure blocks in main() —
+    _gh_annotation → _record_step → _write_step_summary → print → flag_error.
+    """
+    _gh_annotation("error", message, step)
+    _record_step(step, "error")
+    _write_step_summary(run_id or "unknown")
+    print(f"ERROR during step {step}: {message}", file=sys.stderr)
+    if not file_mode and run_id is not None:
+        try:
+            flag_error(run_id, step, message, config)
+        except Exception as e:  # noqa: BLE001
+            print(f"[2a] WARNING: failed to flag error: {e}", file=sys.stderr)
+    return 1
+
+
 def main() -> int:
+
     # --- Load and validate configuration -----------------------------------
     try:
         config = EnvConfig()
@@ -1115,10 +1235,9 @@ def main() -> int:
         return 2
 
     # Pre-flight check: verify the AI endpoint is reachable before doing
-    # any expensive work. A wrong endpoint previously caused litellm to
-    # retry for up to 20 minutes (3 retries × 300s timeout). This TCP
-    # connect check fails in ~10s instead.
+    # any expensive work.
     try:
+
         validate_llm_endpoint(config)
         _record_step("0", "ok")
     except AnalyzerError as exc:
@@ -1149,26 +1268,22 @@ def main() -> int:
             _set_output("run_id", run_id)
         except AnalyzerError as exc:
             # 1a is outside the 1b-1j error-flag window; just fail.
-            _gh_annotation("error", exc.message, exc.step)
-            _record_step("1a", "error")
-            _write_step_summary(run_id or "unknown")
-            print(f"ERROR during step 1a: {exc.message}", file=sys.stderr)
-            return 1
+            return _fail(exc.step, exc.message, run_id, config, file_mode)
         except Exception as exc:  # noqa: BLE001
-            # Network or other unexpected error
-            _gh_annotation("error", str(exc), "1a")
-            _record_step("1a", "error")
-            _write_step_summary("unknown")
-            print(f"ERROR during step 1a: {exc}", file=sys.stderr)
-            return 1
+            return _fail("1a", str(exc), run_id, config, file_mode)
+
     _record_step("1a", "ok")
+
+    # run_id is non-None on every path that reaches here (file mode sets it
+    # via local_run_id; service mode sets it via trigger_analyzer or already
+    # returned). Narrow for Pylance so poll_analyzer_result(run_id, ...) type-checks.
+    assert run_id is not None
 
     # --- Steps 1b-1j (wrapped for error flagging) ---------------------------
     try:
         # 1b — obtain raw pprof profile (poll SERVICE_URL, or load from file)
         # Use a truthy check (not `is not None`) so that an empty string is
         # treated the same as None — matching the `bool()` used for file_mode.
-        # Pylance narrows str|None to str after a truthy check.
         if config.analyzer_result_file:
             pprof_path = load_analyzer_result_from_file(config.analyzer_result_file)
         else:
@@ -1176,14 +1291,13 @@ def main() -> int:
 
 
 
-        # Convert the raw pprof profile to LLM-friendly markdown via
-        # pprof-to-md. The markdown replaces the old JSON analyzer result.
-        # convert_pprof_to_markdown writes directly to artifacts/analyzer_result.md
-        # via -o; the explicit _write_artifact below guarantees the artifact
-        # exists at the expected path (consistent with all other steps).
+
+        # Convert the raw pprof profile to LLM-friendly markdown via pprof-to-md.
+        # convert_pprof_to_markdown writes directly to artifacts/analyzer_result.md via -o.
         analyzer_result = convert_pprof_to_markdown(pprof_path, config.action_path)
-        _write_artifact("analyzer_result.md", analyzer_result)
         _record_step("1b", "ok")
+
+
 
         # 1c — prepare git checkout
         repo = prepare_git_checkout(config.tags)
@@ -1194,8 +1308,10 @@ def main() -> int:
         _record_step("1d", "ok")
 
         # 1e — construct prompt with file list
+
         file_list = list_repo_files(repo)
         prompt = construct_prompt(prompt_template, config.reference, analyzer_result, file_list)
+
         _write_artifact("prompt.txt", prompt)
         _record_step("1e", "ok")
 
@@ -1218,27 +1334,10 @@ def main() -> int:
         _gh_annotation("notice", f"PR created: {pr_url} (#{pr_number})", "1j")
 
     except AnalyzerError as exc:
-        _gh_annotation("error", exc.message, exc.step)
-        _record_step(exc.step, "error")
-        _write_step_summary(run_id or "unknown")
-        print(f"ERROR during step {exc.step}: {exc.message}", file=sys.stderr)
-        # 2a — flag error (skipped in file mode; no SERVICE_URL run registered)
-        if not file_mode:
-            try:
-                flag_error(run_id, exc.step, exc.message, config)
-            except Exception as e:  # noqa: BLE001
-                print(f"[2a] WARNING: failed to flag error: {e}", file=sys.stderr)
-        return 1
+        return _fail(exc.step, exc.message, run_id, config, file_mode)
     except Exception as exc:  # noqa: BLE001
-        _gh_annotation("error", str(exc), "unknown")
-        _write_step_summary(run_id or "unknown")
-        print(f"ERROR during steps 1b-1j: {exc}", file=sys.stderr)
-        if not file_mode:
-            try:
-                flag_error(run_id, "unknown", str(exc), config)
-            except Exception as e:  # noqa: BLE001
-                print(f"[2a] WARNING: failed to flag error: {e}", file=sys.stderr)
-        return 1
+        return _fail("unknown", str(exc), run_id, config, file_mode)
+
 
     # --- Step 1k: flag submitted (skipped in file mode) --------------------
     if file_mode:
