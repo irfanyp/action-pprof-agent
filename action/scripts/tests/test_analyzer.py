@@ -26,6 +26,7 @@ Classes: TestServiceRequest, TestTriggerAnalyzer, TestPollAnalyzerResult,
 ## Workflow Steps Reference
 
 The analyzer.py workflow follows these numbered steps (see Config.STEP_DESCRIPTIONS):
+  0:  Pre-flight: verify AI endpoint is reachable (TCP connect check)
   1a: Trigger analyzer via service API
   1b: Poll result, decode pprof, convert to markdown
   1c: Validate git checkout state
@@ -1145,7 +1146,7 @@ class TestValidateLlmEndpoint:
         validate_llm_endpoint(mock_config)
 
     def test_validate_endpoint_dns_failure_raises(self, mocker, mock_config):
-        """A DNS resolution failure raises AnalyzerError('1f')."""
+        """A DNS resolution failure raises AnalyzerError('0')."""
         import socket as _socket
         mocker.patch(
             "analyzer.socket.create_connection",
@@ -1154,11 +1155,11 @@ class TestValidateLlmEndpoint:
 
         with pytest.raises(AnalyzerError) as exc_info:
             validate_llm_endpoint(mock_config)
-        assert exc_info.value.step == "1f"
+        assert exc_info.value.step == "0"
         assert "unreachable" in exc_info.value.message
 
     def test_validate_endpoint_connection_refused_raises(self, mocker, mock_config):
-        """A connection refused (wrong port / service down) raises AnalyzerError('1f')."""
+        """A connection refused (wrong port / service down) raises AnalyzerError('0')."""
         mocker.patch(
             "analyzer.socket.create_connection",
             side_effect=ConnectionRefusedError("Connection refused"),
@@ -1166,7 +1167,7 @@ class TestValidateLlmEndpoint:
 
         with pytest.raises(AnalyzerError) as exc_info:
             validate_llm_endpoint(mock_config)
-        assert exc_info.value.step == "1f"
+        assert exc_info.value.step == "0"
         assert "unreachable" in exc_info.value.message
 
     def test_validate_endpoint_uses_config_timeout(self, mocker, mock_config):
@@ -1181,11 +1182,11 @@ class TestValidateLlmEndpoint:
         assert kwargs["timeout"] == Config.LLM_ENDPOINT_CONNECT_TIMEOUT_SECONDS
 
     def test_validate_endpoint_no_host_raises(self, mocker, mock_config):
-        """An endpoint URL with no host raises AnalyzerError('1f')."""
+        """An endpoint URL with no host raises AnalyzerError('0')."""
         mock_config.ai_endpoint = "not-a-url"
         with pytest.raises(AnalyzerError) as exc_info:
             validate_llm_endpoint(mock_config)
-        assert exc_info.value.step == "1f"
+        assert exc_info.value.step == "0"
         assert "no host" in exc_info.value.message
 
 
