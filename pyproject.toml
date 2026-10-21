@@ -9,7 +9,7 @@ description = "Analyzer for CPU profiles with LLM-powered optimization suggestio
 requires-python = ">=3.12"
 dependencies = [
     "mcp[cli]>=2.1.1,<2.3.0",
-    "GitPython~=3.1.59",
+    "GitPython>=3.1.59,<3.3.0",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.23",
 ]
